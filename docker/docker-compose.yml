@@ -1,0 +1,127 @@
+# Portrait 用户数据画像服务 Docker Compose 配置
+# 用于本地开发和测试
+
+version: '3.8'
+
+services:
+  # ===========================================
+  # API 服务
+  # ===========================================
+  portrait-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: portrait-api
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=production
+      - DEBUG=false
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=portrait
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-portrait123}
+      - POSTGRES_DB=portrait
+      - REDIS_URL=redis://redis:6379/0
+      # MySQL 源数据库配置 (需要根据实际情况修改)
+      - MYSQL_HOST=${MYSQL_HOST:-mysql}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
+      - MYSQL_USER=${MYSQL_USER:-root}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-}
+      - MYSQL_DB=${MYSQL_DB:-outbound_saas}
+      # LLM 配置
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - portrait-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ===========================================
+  # 定时任务调度器 (后续阶段实现)
+  # ===========================================
+  # portrait-scheduler:
+  #   build:
+  #     context: ..
+  #     dockerfile: docker/Dockerfile
+  #   container_name: portrait-scheduler
+  #   command: ["python", "-m", "src.tasks.scheduler"]
+  #   environment:
+  #     - APP_ENV=production
+  #     - SCHEDULER_ENABLED=true
+  #     # ... 其他环境变量
+  #   depends_on:
+  #     - postgres
+  #     - redis
+  #   restart: unless-stopped
+  #   networks:
+  #     - portrait-network
+
+  # ===========================================
+  # PostgreSQL 数据库
+  # ===========================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: portrait-postgres
+    environment:
+      POSTGRES_USER: portrait
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-portrait123}
+      POSTGRES_DB: portrait
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - portrait-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U portrait -d portrait"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================
+  # Redis 缓存
+  # ===========================================
+  redis:
+    image: redis:7-alpine
+    container_name: portrait-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - portrait-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# ===========================================
+# 数据卷
+# ===========================================
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ===========================================
+# 网络
+# ===========================================
+networks:
+  portrait-network:
+    driver: bridge
+
