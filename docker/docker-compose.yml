@@ -1,8 +1,6 @@
 # Portrait 用户数据画像服务 Docker Compose 配置
 # 用于本地开发和测试
 
-version: '3.8'
-
 services:
   # ===========================================
   # API 服务
@@ -22,7 +20,6 @@ services:
       - POSTGRES_USER=portrait
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-portrait123}
       - POSTGRES_DB=portrait
-      - REDIS_URL=redis://redis:6379/0
       # MySQL 源数据库配置 (需要根据实际情况修改)
       - MYSQL_HOST=${MYSQL_HOST:-mysql}
       - MYSQL_PORT=${MYSQL_PORT:-3306}
@@ -36,8 +33,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_started
     restart: unless-stopped
     networks:
       - portrait-network
@@ -63,7 +58,6 @@ services:
   #     # ... 其他环境变量
   #   depends_on:
   #     - postgres
-  #     - redis
   #   restart: unless-stopped
   #   networks:
   #     - portrait-network
@@ -90,32 +84,11 @@ services:
       timeout: 5s
       retries: 5
 
-  # ===========================================
-  # Redis 缓存
-  # ===========================================
-  redis:
-    image: redis:7-alpine
-    container_name: portrait-redis
-    command: redis-server --appendonly yes
-    volumes:
-      - redis_data:/data
-    ports:
-      - "6379:6379"
-    networks:
-      - portrait-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
 # ===========================================
 # 数据卷
 # ===========================================
 volumes:
   postgres_data:
-    driver: local
-  redis_data:
     driver: local
 
 # ===========================================
@@ -124,4 +97,3 @@ volumes:
 networks:
   portrait-network:
     driver: bridge
-

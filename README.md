@@ -15,7 +15,6 @@
 - **语言**: Python 3.11+
 - **框架**: FastAPI
 - **数据库**: PostgreSQL (画像存储) + MySQL (源数据只读)
-- **缓存**: Redis
 - **任务调度**: APScheduler
 - **容器化**: Docker
 
@@ -43,17 +42,30 @@ cp env.example .env
 # 编辑 .env 文件，配置数据库连接等信息
 ```
 
-### 3. 初始化数据库
+### 3. 启动 PostgreSQL (Docker)
+
+本地开发需要 PostgreSQL 数据库，可使用 Docker 快速启动：
 
 ```bash
-# 方式一: 使用 Alembic 迁移
-uv run alembic upgrade head
+# 启动 PostgreSQL 容器
+cd docker
+docker compose up -d postgres
 
-# 方式二: 使用初始化脚本
-uv run python scripts/init_db.py
+# 验证服务状态
+docker ps
 ```
 
-### 4. 启动服务
+服务将在以下地址可用：
+- PostgreSQL: `localhost:5432` (用户: portrait, 密码: portrait123)
+
+### 4. 初始化数据库
+
+```bash
+# 执行数据库迁移
+uv run alembic upgrade head
+```
+
+### 5. 启动服务
 
 ```bash
 # 开发环境
@@ -63,20 +75,24 @@ uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 uv run python -m src.main
 ```
 
-### 5. 访问 API 文档
+### 6. 访问 API 文档
 
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
+- 健康检查: http://localhost:8000/health
 
 ## Docker 部署
 
 ```bash
-# 使用 docker-compose 启动所有服务
+# 使用 docker-compose 启动所有服务 (PostgreSQL + API)
 cd docker
-docker-compose up -d
+docker compose up -d
 
 # 查看日志
-docker-compose logs -f portrait-api
+docker compose logs -f portrait-api
+
+# 停止服务
+docker compose down
 ```
 
 ## 项目结构
@@ -105,6 +121,7 @@ potrait/
 ├── migrations/               # 数据库迁移
 ├── tests/                    # 测试
 ├── docker/                   # Docker 配置
+├── docs/                     # 文档
 ├── scripts/                  # 脚本
 ├── pyproject.toml            # 项目配置
 └── README.md
@@ -158,6 +175,10 @@ potrait/
 ### 运行测试
 
 ```bash
+# 安装开发依赖
+uv sync --extra dev
+
+# 运行测试
 uv run pytest tests/ -v
 ```
 
@@ -174,8 +195,17 @@ uv run ruff format .
 uv run alembic revision --autogenerate -m "描述"
 ```
 
+## 本地开发注意事项
+
+1. **MySQL 源数据库**: 源数据库通常在线上环境，本地开发时连接会失败，这是预期行为。API 服务会正常启动，但数据同步功能不可用。
+
+2. **LLM 配置**: Phase 3 之前不需要配置 LLM API Key。
+
+3. **定时任务**: 本地开发建议禁用 (`SCHEDULER_ENABLED=false`)。
+
 ## 后续开发计划
 
+- [x] Phase 1: 基础框架 (API、数据库、工具)
 - [ ] Phase 2: 数据抽取层 (ETL)
 - [ ] Phase 3: LLM 分析层
 - [ ] Phase 4: 画像聚合层
@@ -185,4 +215,3 @@ uv run alembic revision --autogenerate -m "描述"
 ## 许可证
 
 MIT License
-

@@ -81,15 +81,6 @@ class Settings(BaseSettings):
         )
     
     # ===========================================
-    # Redis
-    # ===========================================
-    redis_url: str = Field(
-        default="redis://localhost:6379/0", description="Redis 连接 URL"
-    )
-    cache_ttl_seconds: int = Field(default=3600, description="缓存过期时间(秒)")
-    cache_prefix: str = Field(default="portrait:", description="缓存 key 前缀")
-    
-    # ===========================================
     # LLM 配置
     # ===========================================
     llm_provider: Literal["openai", "qwen"] = Field(
