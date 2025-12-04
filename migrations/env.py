@@ -8,16 +8,13 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.core.config import settings
 from src.models.portrait.base import PortraitBase
 
 # Alembic Config 对象
 config = context.config
-
-# 设置数据库 URL
-config.set_main_option("sqlalchemy.url", settings.postgres_sync_dsn)
 
 # 日志配置
 if config.config_file_name is not None:
@@ -33,7 +30,7 @@ def run_migrations_offline() -> None:
     
     不需要数据库连接，仅生成 SQL
     """
-    url = config.get_main_option("sqlalchemy.url")
+    url = settings.postgres_dsn
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -55,9 +52,9 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     """异步运行迁移"""
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
+    # 直接使用 asyncpg 驱动
+    connectable = create_async_engine(
+        settings.postgres_dsn,
         poolclass=pool.NullPool,
     )
 

@@ -96,34 +96,47 @@ _source_engine: AsyncEngine | None = None
 _source_session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
-async def init_source_db() -> None:
-    """初始化 MySQL 连接池 (只读)"""
+async def init_source_db() -> bool:
+    """
+    初始化 MySQL 连接池 (只读)
+    
+    Returns:
+        bool: 连接是否成功
+    """
     global _source_engine, _source_session_factory
     
     logger.info(f"初始化 MySQL 连接: {settings.mysql_host}:{settings.mysql_port}")
     
-    _source_engine = create_async_engine(
-        settings.mysql_dsn,
-        echo=settings.debug,
-        pool_size=5,
-        max_overflow=10,
-        pool_pre_ping=True,
-        pool_recycle=3600,
-    )
-    
-    _source_session_factory = async_sessionmaker(
-        bind=_source_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autocommit=False,
-        autoflush=False,
-    )
-    
-    # 测试连接
-    async with _source_engine.begin() as conn:
-        await conn.execute(text("SELECT 1"))
-    
-    logger.info("MySQL 连接池初始化成功")
+    try:
+        _source_engine = create_async_engine(
+            settings.mysql_dsn,
+            echo=settings.debug,
+            pool_size=5,
+            max_overflow=10,
+            pool_pre_ping=True,
+            pool_recycle=3600,
+        )
+        
+        _source_session_factory = async_sessionmaker(
+            bind=_source_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autocommit=False,
+            autoflush=False,
+        )
+        
+        # 测试连接
+        async with _source_engine.begin() as conn:
+            await conn.execute(text("SELECT 1"))
+        
+        logger.info("MySQL 连接池初始化成功")
+        return True
+    except Exception as e:
+        logger.warning(f"MySQL 连接失败 (源数据库不可用): {e}")
+        logger.warning("注意: 源数据库连接失败不影响 API 启动，但数据同步功能将不可用")
+        _source_engine = None
+        _source_session_factory = None
+        return False
 
 
 async def close_source_db() -> None:
@@ -146,7 +159,7 @@ async def get_source_db() -> AsyncGenerator[AsyncSession, None]:
             result = await session.execute(...)
     """
     if _source_session_factory is None:
-        raise RuntimeError("MySQL 连接池未初始化，请先调用 init_source_db()")
+        raise RuntimeError("MySQL 源数据库不可用。请检查网络连接或配置。")
     
     async with _source_session_factory() as session:
         try:
@@ -155,6 +168,11 @@ async def get_source_db() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+
+
+def is_source_db_available() -> bool:
+    """检查 MySQL 源数据库是否可用"""
+    return _source_session_factory is not None
 
 
 # ===========================================
