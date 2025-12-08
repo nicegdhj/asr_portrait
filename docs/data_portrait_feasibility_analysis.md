@@ -19,7 +19,8 @@
     "id": "uuid",                    # 记录ID
     "task_id": "uuid",               # 任务ID
     "callid": "string",              # 通话ID (关联detail表)
-    "user_id": "uuid",               # 用户ID
+    "user_id": "uuid",               # ❗ 坐席用户ID (非被呼客户)
+    "customer_id": "uuid",           # ⭐ 被呼客户ID (画像主体)
     "callee": "string",              # 被叫号码
     "bill": "int",                   # 计费时长(毫秒)
     "duration": "int",               # 总时长(毫秒)
@@ -37,6 +38,8 @@
     "created_at": "datetime"
 }
 ```
+
+> ❗ **重要区分**: `user_id` 是创建任务的坐席，`customer_id` 是被呼叫的客户。画像系统以 `customer_id` 为主体。
 
 ### 2.2 通话详情表 `autodialer_call_record_detail_{YYYY_MM}`
 
@@ -446,4 +449,3 @@ nlp = [
 ---
 
 *文档生成时间: 2024-12-03*
-

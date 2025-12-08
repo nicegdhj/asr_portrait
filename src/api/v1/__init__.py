@@ -1,6 +1,5 @@
 """API v1 路由"""
 
-from . import periods, portrait, admin
+from . import admin, periods, portrait, task
 
-__all__ = ["periods", "portrait", "admin"]
-
+__all__ = ["periods", "portrait", "admin", "task"]

@@ -1,0 +1,133 @@
+项目交维文档
+1.系统结构与拓扑
+整体部署位置如下：
+　　　
+服务/中间件	私网IP	部署内容
+管理端	188.107.245.58	manage（含有docker）
+客户端	188.107.245.45	saas（含有docker）
+软交换（freeswitch）	188.107.245.57	freeswitch
+		nfs
+		odbc
+		sip-core
+		goivr
+		vad（docker）
+file	188.107.245.56	telrobot-services-file
+service	188.107.245.62	node-reg
+		telrobot-services-dialString
+		rabbitmq（docker）
+		gender-proxy-server（docker）
+		telrobot-services-hangupNotify
+		telrobot-services-intentTag
+nlp	188.107.245.60	telrobot-nlp（docker）
+		sentence-core
+mysql	188.107.245.36	mysql-master（docker）
+	188.107.245.42	mysql-slave（docker）
+redis	188.107.245.40	redis-master（docker）
+	188.107.245.41	redis-slave（docker）
+mongoDB	188.107.245.38	mongo-master（docker）
+	188.107.245.37	mongo-slave（docker）
+elasticsearch	188.107.245.38	es-master（docker）
+	188.107.245.37	es-slave（docker）
+asr	 188.107.245.52	voice-balance-gateway
+	188.107.245.61, 188.107.245.50	voice-gateway
+	188.107.240.65, 188.107.240.66, 188.107.240.67, 188.107.240.70, 188.107.240.71, 188.107.240.74, 188.107.240.75,
+188.107.240.77	asr-service
+
+　　系统架构图
+
+2.服务与主机清单
+
+主机/ip	服务名	部署方式	主要功能	日志目录	启停命令/脚本
+188.107.245.58	php-manage	docker管理	 Web端php环境容器	 docker logs php-manage	docker start php-manage
+					
+	Horizon	Docker内supervisord管理	队列服务	/var/www/admin/supervisor/manage-horizon.log	docker exec -it php-manage bash
+					supervisord -c /etc/supervisord.conf
+					　
+	Rabbitmq-worker	Docker内supervisord管理	rabbitmq辅助服务	/var/www/admin/supervisor/rabbitmq_queue.log	docker exec -it php-manage bash
+					supervisord -c /etc/supervisord.conf
+188.107.245.45	Php-saas	docker管理	Web端php环境容器	docker logs php-saas	docker start php-saas
+					
+	Horizon	Docker内supervisord管理	队列服务	/var/www/saas/supervisor/saas-rabbitmq-worker.log	docker exec -it php-saas bash
+					supervisord -c /etc/supervisord.conf
+					　
+	Rabbitmq-worker	Docker内supervisord管理	rabbitmq辅助服务	/var/www/saas/supervisor/rabbitmq_queue.log	docker exec -it php-saas bash
+					supervisord -c /etc/supervisord.conf
+					　
+	laravel	Docker内supervisord管理	laravel服务	/var/www/saas/supervisor/saas-laravel-echo-server.log	docker exec -it php-saas bash
+					supervisord -c /etc/supervisord.conf
+					　
+188.107.245.57	asrproxy	supervisord管理	asr服务	/var/log/supervisor/asrproxy.log	supervisorctl start asrproxy
+	cgi	supervisord管理	cgi服务	/var/log/supervisor/cgi.log	supervisorctl start cgi
+	freeswitch	supervisord管理	freeswitch服务	/var/log/supervisor/fs.log	supervisorctl start freeswitch-server:freeswitch
+	ivr	supervisord管理	ivr服务	/var/log/supervisor/ivr.log	supervisorctl start ivr
+	sip-core	supervisord管理	sip-core服务	/var/log/supervisor/sip-core.log	supervisorctl start sip-core
+188.107.245.62	dialString	supervisord管理	任务拨号串服务	/var/log/supervisor/telrobot-services-dialString.log	supervisorctl start dialString
+	gender-proxy-server	supervisord管理	性别服务	/var/log/supervisor/gender-proxy-server.log	supervisorctl start gender-proxy-server
+	hangupNotify	supervisord管理	挂断通知服务	/var/log/supervisor/hangup-notify-node1.log	supervisorctl start hangupNotify-node1
+				/var/log/supervisor/hangup-notify-node2.log	supervisorctl start hangupNotify-node2
+	intentTag	supervisord管理	意向标签服务	/var/log/supervisor/telrobot-services-intentTag.log	supervisorctl start intentTag
+	numberArea	supervisord管理	号码所属地服务	/var/log/supervisor/telrobot-services-numberArea.log	supervisorctl start numberArea
+	node_grpc	docker管理	grpc服务	docker logs node_grpc	docker start node_grpc
+	rabbitmq	docker管理	rabbitmq服务	docker logs rabbitmq	docker start rabbitmq
+188.107.245.56	telrobot-services-file	supervisord管理	话术录音保存服务	/var/log/supervisor/telrobot-services-file.log	supervisorctl start telrobot-services-file
+188.107.245.60	sentence-core	supervisord管理	nlp中间层服务	/var/log/supervisor/sentence-core	supervisorctl start sentence-core
+					
+					
+	nlp-engine	docker管理	nlp服务	docker logs nlp-engine	docker startS nlp-engine
+	milvus-standalone	docker管理	standalone服务	docker logs milvus-standalone	docker start standalone
+	milvus-minio	docker管理	minio服务	docker logs milvus-minio	docker start milvus-minio
+	nlp-embedding	docker管理	embedding服务	docker logs nlp-embedding	docker start embedding
+	milvus-etcd	docker管理	etcd服务	docker logs milvus-etcd	docker start milvus-etcd
+ 188.107.245.52	voice-balance-gateway	nginx	 对两台 Voice Gateway 做负载均衡	 /var/log/nginx/	 sudo systemctl reload nginx
+188.107.245.61, 188.107.245.50	voice-gateway	 supervisor	WebSocket语音转写服务，转发到后端ASR节点	/home/boco4a/voicegatew/websocket_server.log	supervisorctl restart voicegate
+188.107.240.65, 188.107.240.66, 188.107.240.67, 188.107.240.70, 188.107.240.71, 188.107.240.74, 188.107.240.75,
+188.107.240.77	asr-service	supervisor	执行语音识别任务，使用模型 u1-voice.bin	/data/u1-voice/build/asr.log	supervisorctl restart all
+
+3.中间件信息
+组件	版本	地址/端口	用途	启动命令	停止命令
+Redis-master	 6.0	188.107.245.40:6379	 缓存队列	 docker start redis-master	docker stop redis-master
+MySQL-master	5.7	188.107.245.36:3306	数据库服务	docker start mysql-master	docker stop mysql-master
+MongoDB-master	4.2.24	188.107.245.38:27017	nosql服务	docker start 
+mongo-master	docker stop mongo-master
+Elasticsearch-ik-master	6.7.1	188.107.245.38:9200	索引服务	docker start es-master	docker stop es-master
+Redis-slave	 6.0	188.107.245.41:6379	备库	docker start redis-slave	docker stop redis-slave
+Mysql-slave	5.7	188.107.245.42:3306	备库	docker start mysql-slave	docker stop mysql-slave
+MongoDB-slave	4.2.24	188.107.245.37:27017	备库	docker start mongo-slave	docker stop mongo-slave
+Elasticsearch-ik-slave	6.7.1	188.107.245.37:9200	备库	docker start es-slave	docker stop es-slave
+
+4.数据库信息
+主机/端口	188.107.245.36/3306
+	mysql
+用户名/密码	root/rootpass
+库名1	saas_bdb07bac-d573-4289-b8ff-39029f057bfb
+数据表	见附件1
+库名2	manage
+数据表	见附件2
+
+ER图：见附件3
+5.源码与接口
+1）代码仓库地址：
+　　　Manage管理端：（188.107.245.58）
+　　　代码仓库: 存放在/var/www/admin 
+　　　Saas后端：（188.107.245.45）
+　　　代码仓库: 存放在/var/www/saas
+　　　Saas前端：（188.107.245.45）
+　　　代码仓库: 存放在/var/www/saas-fe/dist
+
+2）源码及说明文档见附件4
+3）对外接口文档见附件5
+6.ASR使用方式
+调用方式：WebSocket（Voice Gateway 接入）
+参数：StartTranscription 控制消息后发送 PCM 音频流
+返回：SentenceBegin / SentenceEnd / Result 消息
+调用示例:
+{"type": "StartTranscription", "task_id": "abc123"}
+语音文件存储路径: /home/boco4a/voicegatew/<日期>/
+
+调用方式	 WebSocket
+url地址	 ws://188.107.245.52:8133
+参数	 StartTranscription 控制消息后发送 PCM 音频流
+调用示例	{"type": "StartTranscription", "task_id": "abc123"}
+
+7.维护信息
+运维手册见附件6

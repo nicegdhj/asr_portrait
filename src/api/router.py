@@ -4,7 +4,7 @@ API 路由汇总
 
 from fastapi import APIRouter
 
-from .v1 import periods, portrait, admin
+from .v1 import admin, periods, portrait, task
 
 api_router = APIRouter()
 
@@ -12,4 +12,4 @@ api_router = APIRouter()
 api_router.include_router(periods.router, prefix="/periods", tags=["周期管理"])
 api_router.include_router(portrait.router, prefix="/portrait", tags=["用户画像"])
 api_router.include_router(admin.router, prefix="/admin", tags=["管理接口"])
-
+api_router.include_router(task.router, prefix="/task", tags=["场景统计"])

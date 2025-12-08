@@ -94,9 +94,9 @@
 
 | 表名 | 分表规则 | 关键字段 |
 |------|----------|----------|
-| `autodialer_task` | 无分表 | id, create_datetime, status |
-| `autodialer_call_record_{YYYY_MM}` | 按任务创建月份 | callid, task_id, user_id, duration, bill, level_name, hangup_disposition |
-| `autodialer_call_record_detail_{YYYY_MM}` | 按任务创建月份 | callid, text (ASR文本) |
+| `autodialer_task` | 无分表 | uuid, create_datetime, name |
+| `autodialer_call_record_{YYYY_MM}` | 按任务创建月份 | callid, task_id, **customer_id**, duration, bill, hangup_disposition |
+| `autodialer_call_record_detail_{YYYY_MM}` | 按任务创建月份 | callid, question (ASR文本) |
 | `autodialer_number_{task_id}` | 按任务ID | phone, call_count, status |
 
 ### 3.2 画像数据表 (读写)
@@ -109,8 +109,8 @@
 CREATE TABLE call_record_enriched (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     callid          VARCHAR(64) NOT NULL UNIQUE,          -- 原始通话ID
-    task_id         UUID NOT NULL,                         -- 任务ID
-    user_id         UUID NOT NULL,                         -- 用户ID
+    task_id         UUID NOT NULL,                         -- 任务/场景ID
+    customer_id     VARCHAR(64) NOT NULL,                  -- ⭐ 被呼客户ID (画像主体)
     call_date       DATE NOT NULL,                         -- 通话日期
     
     -- 原始指标
@@ -128,22 +128,18 @@ CREATE TABLE call_record_enriched (
     churn_risk      VARCHAR(16),                           -- 流失风险: low/medium/high
     llm_analyzed_at TIMESTAMP,                             -- LLM 分析时间
     
-    -- 元数据
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
-    INDEX idx_user_date (user_id, call_date),
-    INDEX idx_task_id (task_id),
-    INDEX idx_call_date (call_date)
+    INDEX idx_customer_task (customer_id, task_id),
+    INDEX idx_task_date (task_id, call_date)
 );
 ```
 
-#### 3.2.2 用户画像快照表 `user_portrait_snapshot`
+#### 3.2.2 客户画像快照表 `customer_portrait_snapshot`
 
 ```sql
-CREATE TABLE user_portrait_snapshot (
+CREATE TABLE customer_portrait_snapshot (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id             UUID NOT NULL,                      -- 用户ID
+    customer_id         VARCHAR(64) NOT NULL,               -- ⭐ 被呼客户ID
+    task_id             UUID NOT NULL,                      -- ⭐ 任务/场景ID
     period_type         VARCHAR(16) NOT NULL,               -- week/month/quarter
     period_key          VARCHAR(16) NOT NULL,               -- 2024-W49 / 2024-11 / 2024-Q4
     period_start        DATE NOT NULL,                      -- 周期开始日期
@@ -555,7 +551,7 @@ potrait/
 |------|------|--------|
 | 5.1 趋势接口 | 多周期趋势数据接口 | 柱状图数据 |
 | 5.2 汇总接口 | 全量统计汇总接口 | 大盘数据 |
-| 5.3 缓存优化 | Redis 缓存热点数据 | 性能提升 |
+| 5.3 查询优化 | 索引优化、分页查询 | 性能提升 |
 | 5.4 接口文档 | OpenAPI 文档完善 | Swagger UI |
 
 ### Phase 6: 容器化部署 (Week 6)
@@ -616,7 +612,6 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.23",
     "asyncpg>=0.29.0",           # PostgreSQL 异步驱动
     "aiomysql>=0.2.0",           # MySQL 异步驱动
-    "redis>=5.0.0",              # Redis 客户端
     
     # 任务调度
     "apscheduler>=3.10.0",
@@ -817,4 +812,3 @@ networks:
 
 *文档版本: v1.0*  
 *最后更新: 2024-12-04*
-

@@ -109,3 +109,4 @@ Desktop.ini
 # - pyproject.toml (项目配置)
 # - uv.lock (依赖锁定)
 
+data/
