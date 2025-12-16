@@ -3,6 +3,12 @@
 
 按周期聚合客户画像指标，按 customer_id + task_id + period 维度
 参考 data_portrait_feasibility_analysis.md 计算口径
+
+多通电话综合规则：
+- 满意度：取最后一次有效评分
+- 情绪：负面优先
+- 风险：高优先
+- 沟通意愿：基于平均时长和轮次
 """
 
 from datetime import date, datetime
@@ -22,6 +28,7 @@ from src.services.period_service import (
     get_period_label,
     PeriodType,
 )
+from src.services.rule_engine_service import rule_engine
 
 
 class PortraitService:
@@ -37,7 +44,7 @@ class PortraitService:
         period_key: str,
     ) -> dict[str, Any]:
         """
-        计算指定周期的用户画像快照
+        计算指定周期的用户画像快照（优化版：批量 GROUP BY 聚合）
 
         Args:
             period_type: 周期类型 (week/month/quarter)
@@ -55,12 +62,58 @@ class PortraitService:
         try:
             start_date, end_date = get_period_range(period_type, period_key)
 
-            # 查询所有 (customer_id, task_id) 组合
             async for session in get_portrait_db():
-                customer_task_result = await session.execute(
+                # 优化：单次 GROUP BY 批量聚合所有 (customer_id, task_id) 组合
+                result = await session.execute(
                     select(
-                        CallRecordEnriched.user_id,  # 存储的是 customer_id
+                        CallRecordEnriched.user_id.label("customer_id"),
                         CallRecordEnriched.task_id,
+                        # 取第一个非空手机号
+                        func.max(CallRecordEnriched.phone).label("phone"),
+                        # 通话统计
+                        func.count().label("total_calls"),
+                        func.sum(case((CallRecordEnriched.bill > 0, 1), else_=0)).label("connected_calls"),
+                        func.sum(CallRecordEnriched.bill).label("total_bill"),
+                        func.avg(case((CallRecordEnriched.bill > 0, CallRecordEnriched.bill), else_=None)).label("avg_bill"),
+                        func.max(CallRecordEnriched.bill).label("max_bill"),
+                        func.min(case((CallRecordEnriched.bill > 0, CallRecordEnriched.bill), else_=None)).label("min_bill"),
+                        func.sum(CallRecordEnriched.rounds).label("total_rounds"),
+                        func.avg(CallRecordEnriched.rounds).label("avg_rounds"),
+                        # 意向分布
+                        func.sum(case((CallRecordEnriched.intention_result == "A", 1), else_=0)).label("level_a"),
+                        func.sum(case((CallRecordEnriched.intention_result == "B", 1), else_=0)).label("level_b"),
+                        func.sum(case((CallRecordEnriched.intention_result == "C", 1), else_=0)).label("level_c"),
+                        func.sum(case((CallRecordEnriched.intention_result == "D", 1), else_=0)).label("level_d"),
+                        func.sum(case((CallRecordEnriched.intention_result == "E", 1), else_=0)).label("level_e"),
+                        func.sum(case((CallRecordEnriched.intention_result == "F", 1), else_=0)).label("level_f"),
+                        # 挂断分布
+                        func.sum(case((CallRecordEnriched.hangup_by == 1, 1), else_=0)).label("robot_hangup"),
+                        func.sum(case((CallRecordEnriched.hangup_by == 2, 1), else_=0)).label("user_hangup"),
+                        # 情感分布
+                        func.sum(case((CallRecordEnriched.sentiment == "positive", 1), else_=0)).label("positive_count"),
+                        func.sum(case((CallRecordEnriched.sentiment == "neutral", 1), else_=0)).label("neutral_count"),
+                        func.sum(case((CallRecordEnriched.sentiment == "negative", 1), else_=0)).label("negative_count"),
+                        func.avg(CallRecordEnriched.sentiment_score).label("avg_sentiment_score"),
+                        # 风险分布
+                        func.sum(case((CallRecordEnriched.complaint_risk == "high", 1), else_=0)).label("high_complaint"),
+                        func.sum(case((CallRecordEnriched.complaint_risk == "medium", 1), else_=0)).label("medium_complaint"),
+                        func.sum(case((CallRecordEnriched.complaint_risk == "low", 1), else_=0)).label("low_complaint"),
+                        func.sum(case((CallRecordEnriched.churn_risk == "high", 1), else_=0)).label("high_churn"),
+                        func.sum(case((CallRecordEnriched.churn_risk == "medium", 1), else_=0)).label("medium_churn"),
+                        func.sum(case((CallRecordEnriched.churn_risk == "low", 1), else_=0)).label("low_churn"),
+                        # 满意度分布
+                        func.sum(case((CallRecordEnriched.satisfaction == "satisfied", 1), else_=0)).label("satisfied"),
+                        func.sum(case((CallRecordEnriched.satisfaction == "neutral", 1), else_=0)).label("neutral_satisfaction"),
+                        func.sum(case((CallRecordEnriched.satisfaction == "unsatisfied", 1), else_=0)).label("unsatisfied"),
+                        # 沟通意愿分布
+                        func.sum(case((CallRecordEnriched.willingness == "深度", 1), else_=0)).label("willingness_deep"),
+                        func.sum(case((CallRecordEnriched.willingness == "一般", 1), else_=0)).label("willingness_normal"),
+                        func.sum(case((CallRecordEnriched.willingness == "较低", 1), else_=0)).label("willingness_low"),
+                        # 综合风险分布
+                        func.sum(case((CallRecordEnriched.risk_level == "churn", 1), else_=0)).label("risk_churn"),
+                        func.sum(case((CallRecordEnriched.risk_level == "complaint", 1), else_=0)).label("risk_complaint"),
+                        func.sum(case((CallRecordEnriched.risk_level == "medium", 1), else_=0)).label("risk_medium"),
+                        func.sum(case((CallRecordEnriched.risk_level == "none", 1), else_=0)).label("risk_none"),
                     )
                     .where(
                         and_(
@@ -68,11 +121,11 @@ class PortraitService:
                             CallRecordEnriched.call_date <= end_date,
                         )
                     )
-                    .distinct()
+                    .group_by(CallRecordEnriched.user_id, CallRecordEnriched.task_id)
                 )
-                customer_task_pairs = [(row.user_id, row.task_id) for row in customer_task_result]
+                rows = result.all()
 
-            if not customer_task_pairs:
+            if not rows:
                 logger.info(f"周期 {period_key} 没有通话记录")
                 await period_service.update_period_status(
                     period_type,
@@ -84,34 +137,200 @@ class PortraitService:
                 )
                 return {"status": "success", "customers": 0, "records": 0}
 
-            logger.info(f"周期内客户-任务组合数: {len(customer_task_pairs)}")
+            logger.info(f"周期内客户-任务组合数: {len(rows)}，开始批量写入...")
 
-            # 逐客户-任务组合计算画像
+            # 获取每个客户的最后一次有效满意度和情感（用于综合规则）
+            last_satisfaction_map = await self._get_last_satisfaction(
+                session, start_date, end_date
+            )
+            last_emotion_map = await self._get_last_emotion(
+                session, start_date, end_date
+            )
+
+            # 批量构建快照数据
             total_records = 0
-            for customer_id, task_id in customer_task_pairs:
-                snapshot = await self._compute_customer_snapshot(
-                    customer_id, task_id, period_type, period_key, start_date, end_date
-                )
-                if snapshot:
-                    total_records += snapshot.total_calls
+            snapshot_list = []
+            for row in rows:
+                total_calls = row.total_calls or 0
+                connected_calls = row.connected_calls or 0
+                connect_rate = connected_calls / total_calls if total_calls > 0 else 0.0
+
+                # 转换时长 (毫秒 -> 秒)
+                total_duration = (row.total_bill or 0) // 1000
+                avg_duration = (row.avg_bill or 0) / 1000
+                max_duration = (row.max_bill or 0) // 1000
+                min_duration = (row.min_bill or 0) // 1000
+
+                # 多通电话综合规则
+                key = (row.customer_id, str(row.task_id))
+                
+                # 1. 满意度：取最后一次有效评分
+                final_satisfaction = last_satisfaction_map.get(key)
+                
+                # 2. 情感：负面优先
+                positive_count = row.positive_count or 0
+                negative_count = row.negative_count or 0
+                if negative_count > 0:
+                    final_emotion = 'negative'
+                elif positive_count > 0:
+                    final_emotion = 'positive'
+                else:
+                    final_emotion = 'neutral'
+                
+                # 3. 沟通意愿：基于平均时长和平均轮次
+                avg_rounds = float(row.avg_rounds or 0)
+                willingness = rule_engine._analyze_willingness(int(avg_duration), int(avg_rounds))
+                
+                # 4. 综合风险：高优先
+                high_complaint = row.high_complaint or 0
+                high_churn = row.high_churn or 0
+                medium_complaint = row.medium_complaint or 0
+                medium_churn = row.medium_churn or 0
+                
+                if high_churn > 0:
+                    risk_level = 'churn'
+                elif high_complaint > 0:
+                    risk_level = 'complaint'
+                elif medium_complaint > 0 or medium_churn > 0:
+                    risk_level = 'medium'
+                else:
+                    risk_level = 'none'
+
+                snapshot_list.append({
+                    "customer_id": row.customer_id,
+                    "phone": row.phone,
+                    "task_id": row.task_id,
+                    "period_type": period_type,
+                    "period_key": period_key,
+                    "period_start": start_date,
+                    "period_end": end_date,
+                    "total_calls": total_calls,
+                    "connected_calls": connected_calls,
+                    "connect_rate": round(connect_rate, 4),
+                    "total_duration": total_duration,
+                    "avg_duration": round(avg_duration, 2),
+                    "max_duration": max_duration,
+                    "min_duration": min_duration,
+                    "total_rounds": row.total_rounds or 0,
+                    "avg_rounds": round(avg_rounds, 2),
+                    "level_a_count": row.level_a or 0,
+                    "level_b_count": row.level_b or 0,
+                    "level_c_count": row.level_c or 0,
+                    "level_d_count": row.level_d or 0,
+                    "level_e_count": row.level_e or 0,
+                    "level_f_count": row.level_f or 0,
+                    "robot_hangup_count": row.robot_hangup or 0,
+                    "user_hangup_count": row.user_hangup or 0,
+                    "positive_count": positive_count,
+                    "neutral_count": row.neutral_count or 0,
+                    "negative_count": negative_count,
+                    "avg_sentiment_score": round(float(row.avg_sentiment_score or 0.5), 4),
+                    "high_complaint_risk": high_complaint,
+                    "medium_complaint_risk": medium_complaint,
+                    "low_complaint_risk": row.low_complaint or 0,
+                    "high_churn_risk": high_churn,
+                    "medium_churn_risk": medium_churn,
+                    "low_churn_risk": row.low_churn or 0,
+                    # 满意度
+                    "satisfied_count": row.satisfied or 0,
+                    "neutral_satisfaction_count": row.neutral_satisfaction or 0,
+                    "unsatisfied_count": row.unsatisfied or 0,
+                    "final_satisfaction": final_satisfaction,
+                    # 情感
+                    "final_emotion": final_emotion,
+                    # 沟通意愿
+                    "willingness": willingness,
+                    "willingness_deep_count": row.willingness_deep or 0,
+                    "willingness_normal_count": row.willingness_normal or 0,
+                    "willingness_low_count": row.willingness_low or 0,
+                    # 综合风险
+                    "risk_level": risk_level,
+                    "risk_churn_count": row.risk_churn or 0,
+                    "risk_complaint_count": row.risk_complaint or 0,
+                    "risk_medium_count": row.risk_medium or 0,
+                    "risk_none_count": row.risk_none or 0,
+                    "computed_at": datetime.now(),
+                })
+                total_records += total_calls
+
+            # 批量 UPSERT（分批处理，每批 100 条，避免超过 PostgreSQL 32767 参数限制）
+            batch_size = 100
+            async for session in get_portrait_db():
+                for i in range(0, len(snapshot_list), batch_size):
+                    batch = snapshot_list[i:i + batch_size]
+                    stmt = insert(UserPortraitSnapshot).values(batch)
+                    stmt = stmt.on_conflict_do_update(
+                        constraint="uq_customer_task_period",
+                        set_={
+                            "phone": stmt.excluded.phone,
+                            "total_calls": stmt.excluded.total_calls,
+                            "connected_calls": stmt.excluded.connected_calls,
+                            "connect_rate": stmt.excluded.connect_rate,
+                            "total_duration": stmt.excluded.total_duration,
+                            "avg_duration": stmt.excluded.avg_duration,
+                            "max_duration": stmt.excluded.max_duration,
+                            "min_duration": stmt.excluded.min_duration,
+                            "total_rounds": stmt.excluded.total_rounds,
+                            "avg_rounds": stmt.excluded.avg_rounds,
+                            "level_a_count": stmt.excluded.level_a_count,
+                            "level_b_count": stmt.excluded.level_b_count,
+                            "level_c_count": stmt.excluded.level_c_count,
+                            "level_d_count": stmt.excluded.level_d_count,
+                            "level_e_count": stmt.excluded.level_e_count,
+                            "level_f_count": stmt.excluded.level_f_count,
+                            "robot_hangup_count": stmt.excluded.robot_hangup_count,
+                            "user_hangup_count": stmt.excluded.user_hangup_count,
+                            "positive_count": stmt.excluded.positive_count,
+                            "neutral_count": stmt.excluded.neutral_count,
+                            "negative_count": stmt.excluded.negative_count,
+                            "avg_sentiment_score": stmt.excluded.avg_sentiment_score,
+                            "high_complaint_risk": stmt.excluded.high_complaint_risk,
+                            "medium_complaint_risk": stmt.excluded.medium_complaint_risk,
+                            "low_complaint_risk": stmt.excluded.low_complaint_risk,
+                            "high_churn_risk": stmt.excluded.high_churn_risk,
+                            "medium_churn_risk": stmt.excluded.medium_churn_risk,
+                            "low_churn_risk": stmt.excluded.low_churn_risk,
+                            # 满意度
+                            "satisfied_count": stmt.excluded.satisfied_count,
+                            "neutral_satisfaction_count": stmt.excluded.neutral_satisfaction_count,
+                            "unsatisfied_count": stmt.excluded.unsatisfied_count,
+                            "final_satisfaction": stmt.excluded.final_satisfaction,
+                            # 情感
+                            "final_emotion": stmt.excluded.final_emotion,
+                            # 沟通意愿
+                            "willingness": stmt.excluded.willingness,
+                            "willingness_deep_count": stmt.excluded.willingness_deep_count,
+                            "willingness_normal_count": stmt.excluded.willingness_normal_count,
+                            "willingness_low_count": stmt.excluded.willingness_low_count,
+                            # 综合风险
+                            "risk_level": stmt.excluded.risk_level,
+                            "risk_churn_count": stmt.excluded.risk_churn_count,
+                            "risk_complaint_count": stmt.excluded.risk_complaint_count,
+                            "risk_medium_count": stmt.excluded.risk_medium_count,
+                            "risk_none_count": stmt.excluded.risk_none_count,
+                            "computed_at": stmt.excluded.computed_at,
+                        },
+                    )
+                    await session.execute(stmt)
+                await session.commit()
 
             # 更新周期状态
             await period_service.update_period_status(
                 period_type,
                 period_key,
                 "completed",
-                total_users=len(customer_task_pairs),
+                total_users=len(rows),
                 total_records=total_records,
                 computed_at=datetime.now(),
             )
 
-            logger.info(f"快照计算完成: {period_key}, customers={len(customer_task_pairs)}, records={total_records}")
+            logger.info(f"快照计算完成: {period_key}, customers={len(rows)}, records={total_records}")
 
             return {
                 "status": "success",
                 "period_type": period_type,
                 "period_key": period_key,
-                "customers": len(customer_task_pairs),
+                "customers": len(rows),
                 "records": total_records,
             }
 
@@ -124,6 +343,84 @@ class PortraitService:
                 error_message=str(e),
             )
             raise
+
+    async def _get_last_satisfaction(
+        self,
+        session,
+        start_date: date,
+        end_date: date,
+    ) -> dict[tuple[str, str], str]:
+        """
+        获取每个客户的最后一次有效满意度评分
+        
+        实现"取最后一次有效评分"的综合规则
+        
+        Returns:
+            {(customer_id, task_id): satisfaction}
+        """
+        # 使用 DISTINCT ON 获取每个 (customer_id, task_id) 的最后一条有效记录
+        result = await session.execute(
+            text("""
+                SELECT DISTINCT ON (user_id, task_id)
+                    user_id as customer_id,
+                    task_id::text,
+                    satisfaction
+                FROM call_record_enriched
+                WHERE call_date >= :start_date
+                  AND call_date <= :end_date
+                  AND satisfaction IS NOT NULL
+                ORDER BY user_id, task_id, call_date DESC
+            """),
+            {"start_date": start_date, "end_date": end_date},
+        )
+        
+        satisfaction_map = {}
+        for row in result.fetchall():
+            key = (row.customer_id, row.task_id)
+            satisfaction_map[key] = row.satisfaction
+        
+        return satisfaction_map
+
+    async def _get_last_emotion(
+        self,
+        session,
+        start_date: date,
+        end_date: date,
+    ) -> dict[tuple[str, str], str]:
+        """
+        获取每个客户的情感（负面优先）
+        
+        Returns:
+            {(customer_id, task_id): emotion}
+        """
+        # 简化处理：如果有任何负面情绪记录就是negative
+        result = await session.execute(
+            text("""
+                SELECT 
+                    user_id as customer_id,
+                    task_id::text,
+                    MAX(CASE WHEN sentiment = 'negative' THEN 1 ELSE 0 END) as has_negative,
+                    MAX(CASE WHEN sentiment = 'positive' THEN 1 ELSE 0 END) as has_positive
+                FROM call_record_enriched
+                WHERE call_date >= :start_date
+                  AND call_date <= :end_date
+                  AND sentiment IS NOT NULL
+                GROUP BY user_id, task_id
+            """),
+            {"start_date": start_date, "end_date": end_date},
+        )
+        
+        emotion_map = {}
+        for row in result.fetchall():
+            key = (row.customer_id, row.task_id)
+            if row.has_negative:
+                emotion_map[key] = 'negative'
+            elif row.has_positive:
+                emotion_map[key] = 'positive'
+            else:
+                emotion_map[key] = 'neutral'
+        
+        return emotion_map
 
     async def _compute_customer_snapshot(
         self,
@@ -138,6 +435,21 @@ class PortraitService:
         计算单个客户在某任务下的画像快照
         """
         async for session in get_portrait_db():
+            # 先获取客户的手机号（取第一条记录的 phone）
+            phone_result = await session.execute(
+                select(CallRecordEnriched.phone)
+                .where(
+                    and_(
+                        CallRecordEnriched.user_id == customer_id,
+                        CallRecordEnriched.task_id == task_id,
+                        CallRecordEnriched.phone.isnot(None),
+                    )
+                )
+                .limit(1)
+            )
+            phone_row = phone_result.first()
+            phone = phone_row.phone if phone_row else None
+
             # 聚合查询
             result = await session.execute(
                 select(
@@ -206,6 +518,7 @@ class PortraitService:
             # 构建快照数据
             snapshot_data = {
                 "customer_id": customer_id,
+                "phone": phone,
                 "task_id": task_id,
                 "period_type": period_type,
                 "period_key": period_key,
@@ -581,14 +894,24 @@ class PortraitService:
                     func.sum(UserPortraitSnapshot.connected_calls).label("connected_calls"),
                     func.avg(UserPortraitSnapshot.connect_rate).label("connect_rate"),
                     func.avg(UserPortraitSnapshot.avg_duration).label("avg_duration"),
-                    # 满意度统计（基于情绪）
+                    # 满意度统计
+                    func.sum(UserPortraitSnapshot.satisfied_count).label("satisfied_total"),
+                    func.sum(UserPortraitSnapshot.neutral_satisfaction_count).label("neutral_satisfaction_total"),
+                    func.sum(UserPortraitSnapshot.unsatisfied_count).label("unsatisfied_total"),
+                    # 情感统计
                     func.sum(UserPortraitSnapshot.positive_count).label("positive_total"),
-                    func.sum(UserPortraitSnapshot.neutral_count).label("neutral_total"),
+                    func.sum(UserPortraitSnapshot.neutral_count).label("neutral_emotion_total"),
                     func.sum(UserPortraitSnapshot.negative_count).label("negative_total"),
                     func.avg(UserPortraitSnapshot.avg_sentiment_score).label("avg_sentiment"),
                     # 风险统计
-                    func.sum(case((UserPortraitSnapshot.high_complaint_risk > 0, 1), else_=0)).label("high_complaint"),
-                    func.sum(case((UserPortraitSnapshot.high_churn_risk > 0, 1), else_=0)).label("high_churn"),
+                    func.sum(case((UserPortraitSnapshot.risk_level == 'complaint', 1), else_=0)).label("high_complaint"),
+                    func.sum(case((UserPortraitSnapshot.risk_level == 'churn', 1), else_=0)).label("high_churn"),
+                    func.sum(case((UserPortraitSnapshot.risk_level == 'medium', 1), else_=0)).label("medium_risk"),
+                    func.sum(case((UserPortraitSnapshot.risk_level == 'none', 1), else_=0)).label("no_risk"),
+                    # 沟通意愿统计
+                    func.sum(case((UserPortraitSnapshot.willingness == '深度', 1), else_=0)).label("deep_willingness"),
+                    func.sum(case((UserPortraitSnapshot.willingness == '一般', 1), else_=0)).label("normal_willingness"),
+                    func.sum(case((UserPortraitSnapshot.willingness == '较低', 1), else_=0)).label("low_willingness"),
                 )
                 .where(
                     and_(
@@ -612,19 +935,35 @@ class PortraitService:
                 total_customers = row.total_customers or 0
                 total_calls = row.total_calls or 0
                 connected_calls = row.connected_calls or 0
+                
+                # 满意度统计
+                satisfied_total = row.satisfied_total or 0
+                neutral_satisfaction_total = row.neutral_satisfaction_total or 0
+                unsatisfied_total = row.unsatisfied_total or 0
+                total_satisfaction = satisfied_total + neutral_satisfaction_total + unsatisfied_total
+                satisfied_rate = satisfied_total / total_satisfaction if total_satisfaction > 0 else 0
+                
+                # 情感统计
                 positive_total = row.positive_total or 0
-                neutral_total = row.neutral_total or 0
+                neutral_emotion_total = row.neutral_emotion_total or 0
                 negative_total = row.negative_total or 0
+                total_emotion = positive_total + neutral_emotion_total + negative_total
+                positive_rate = positive_total / total_emotion if total_emotion > 0 else 0
 
-                # 计算满意率（正面情绪占比）
-                total_sentiment = positive_total + neutral_total + negative_total
-                satisfied_rate = positive_total / total_sentiment if total_sentiment > 0 else 0
-
-                # 计算风险占比
+                # 风险统计
                 high_complaint = row.high_complaint or 0
                 high_churn = row.high_churn or 0
+                medium_risk = row.medium_risk or 0
+                no_risk = row.no_risk or 0
                 high_complaint_rate = high_complaint / total_customers if total_customers > 0 else 0
                 high_churn_rate = high_churn / total_customers if total_customers > 0 else 0
+                high_risk_rate = (high_complaint + high_churn) / total_customers if total_customers > 0 else 0
+                
+                # 沟通意愿统计
+                deep_willingness = row.deep_willingness or 0
+                normal_willingness = row.normal_willingness or 0
+                low_willingness = row.low_willingness or 0
+                deep_willingness_rate = deep_willingness / total_customers if total_customers > 0 else 0
 
                 summary_data = {
                     "task_id": row.task_id,
@@ -637,17 +976,30 @@ class PortraitService:
                     "connected_calls": connected_calls,
                     "connect_rate": round(row.connect_rate or 0, 4),
                     "avg_duration": round(row.avg_duration or 0, 2),
-                    "satisfied_count": positive_total,
+                    # 满意度
+                    "satisfied_count": satisfied_total,
                     "satisfied_rate": round(satisfied_rate, 4),
-                    "neutral_count": neutral_total,
-                    "unsatisfied_count": negative_total,
+                    "neutral_count": neutral_satisfaction_total,
+                    "unsatisfied_count": unsatisfied_total,
+                    # 情感
                     "positive_count": positive_total,
+                    "neutral_emotion_count": neutral_emotion_total,
                     "negative_count": negative_total,
+                    "positive_rate": round(positive_rate, 4),
                     "avg_sentiment_score": round(row.avg_sentiment or 0.5, 4),
+                    # 风险
                     "high_complaint_customers": high_complaint,
                     "high_complaint_rate": round(high_complaint_rate, 4),
                     "high_churn_customers": high_churn,
                     "high_churn_rate": round(high_churn_rate, 4),
+                    "medium_risk_customers": medium_risk,
+                    "no_risk_customers": no_risk,
+                    "high_risk_rate": round(high_risk_rate, 4),
+                    # 沟通意愿
+                    "deep_willingness_count": deep_willingness,
+                    "normal_willingness_count": normal_willingness,
+                    "low_willingness_count": low_willingness,
+                    "deep_willingness_rate": round(deep_willingness_rate, 4),
                     "computed_at": datetime.now(),
                 }
 

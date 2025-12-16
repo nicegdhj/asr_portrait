@@ -2,6 +2,7 @@
 ETL 服务 - 数据抽取与转换
 
 从 MySQL 源数据库同步通话记录到 PostgreSQL 画像存储
+包含基于规则引擎的满意度/情绪/风险分析
 """
 
 import uuid
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.database import get_portrait_db, get_source_db, is_source_db_available
 from src.models.portrait.call_enriched import CallRecordEnriched
+from src.services.rule_engine_service import rule_engine
 from src.utils.table_utils import (
     get_call_record_table,
     get_call_record_detail_table,
@@ -75,6 +77,12 @@ class ETLService:
                     raise
 
         logger.info(f"同步完成: {synced_count} 条记录")
+        
+        # 分析已同步的记录（获取 ASR 并进行规则分析）
+        if synced_count > 0:
+            analyzed_count = await self.analyze_call_records(target_date)
+            logger.info(f"已分析 {analyzed_count} 条记录")
+        
         return {
             "status": "success",
             "synced": synced_count,
@@ -95,12 +103,14 @@ class ETLService:
         table_name = get_call_record_table(target_date)
 
         # 构建查询 SQL - 注意: 使用 customer_id 而不是 user_id
+        # 同时获取 callee (被叫手机号)
         sql = text(f"""
             SELECT 
                 cr.id,
                 cr.callid,
                 cr.task_id,
                 cr.customer_id,
+                cr.callee,
                 DATE(cr.calldate) as call_date,
                 cr.duration,
                 cr.bill,
@@ -139,6 +149,7 @@ class ETLService:
                             "callid": row.callid,
                             "task_id": task_id,
                             "user_id": row.customer_id,  # 注意: user_id 字段存储 customer_id
+                            "phone": row.callee,  # 被叫手机号
                             "call_date": row.call_date,
                             "duration": row.duration or 0,
                             "bill": row.bill or 0,
@@ -180,6 +191,7 @@ class ETLService:
                     "callid": r["callid"],
                     "task_id": r["task_id"],
                     "user_id": r["user_id"],
+                    "phone": r["phone"],
                     "call_date": r["call_date"],
                     "duration": r["duration"],
                     "bill": r["bill"],
@@ -204,11 +216,227 @@ class ETLService:
                 "intention_result": stmt.excluded.intention_result,
                 "hangup_by": stmt.excluded.hangup_by,
                 "call_status": stmt.excluded.call_status,
+                "phone": stmt.excluded.phone,
                 "updated_at": datetime.now(),
             },
         )
 
         await session.execute(stmt)
+
+    async def analyze_call_records(
+        self,
+        target_date: date,
+        batch_size: int = 100,
+    ) -> int:
+        """
+        分析指定日期的通话记录
+        
+        获取 ASR 详情并进行规则引擎分析
+        
+        Args:
+            target_date: 目标日期
+            batch_size: 批量处理大小
+            
+        Returns:
+            分析的记录数
+        """
+        if not is_source_db_available():
+            return 0
+        
+        # 获取需要分析的记录（已接通但未分析的）
+        records_to_analyze = await self._get_records_for_analysis(target_date)
+        
+        if not records_to_analyze:
+            return 0
+        
+        logger.info(f"需要分析 {len(records_to_analyze)} 条通话记录")
+        
+        # 批量获取 ASR 详情
+        asr_data = await self._batch_fetch_asr_details(
+            [(r['callid'], target_date) for r in records_to_analyze],
+            target_date,
+        )
+        
+        # 分析并批量更新
+        analyzed_count = 0
+        updates = []
+        
+        for record in records_to_analyze:
+            callid = record['callid']
+            
+            # 获取该通话的 ASR 数据
+            call_asr = asr_data.get(callid, {'user_text': '', 'asr_labels': []})
+            
+            # 调用规则引擎分析
+            result = rule_engine.analyze_call(
+                user_text=call_asr.get('user_text', ''),
+                asr_labels=call_asr.get('asr_labels', []),
+                duration=record.get('bill', 0) // 1000,  # 毫秒转秒
+                rounds=record.get('rounds', 0),
+            )
+            
+            updates.append({
+                'callid': callid,
+                'satisfaction': result.satisfaction,
+                'satisfaction_source': result.satisfaction_source,
+                'emotion': result.emotion,
+                'complaint_risk': result.complaint_risk,
+                'churn_risk': result.churn_risk,
+                'willingness': result.willingness,
+                'risk_level': result.risk_level,
+            })
+            analyzed_count += 1
+        
+        # 批量更新
+        if updates:
+            await self._batch_update_analysis_results(updates)
+        
+        return analyzed_count
+    
+    async def _get_records_for_analysis(self, target_date: date) -> list[dict]:
+        """获取需要分析的记录"""
+        async for session in get_portrait_db():
+            result = await session.execute(
+                text("""
+                    SELECT callid, bill, rounds
+                    FROM call_record_enriched
+                    WHERE call_date = :target_date
+                      AND bill > 0
+                      AND (sentiment IS NULL OR satisfaction IS NULL)
+                """),
+                {"target_date": target_date},
+            )
+            return [dict(row._mapping) for row in result.fetchall()]
+        return []
+    
+    async def _batch_fetch_asr_details(
+        self,
+        call_ids: list[tuple[str, date]],
+        target_date: date,
+    ) -> dict[str, dict]:
+        """
+        批量获取 ASR 详情
+        
+        Returns:
+            {callid: {'user_text': str, 'asr_labels': list}}
+        """
+        if not call_ids:
+            return {}
+        
+        # 获取表名
+        table_name = get_call_record_detail_table(target_date)
+        
+        # 提取所有 callid
+        callid_list = [c[0] for c in call_ids]
+        
+        # 批量查询 ASR 详情
+        # 使用 IN 查询一次获取所有数据
+        placeholders = ', '.join([f':callid_{i}' for i in range(len(callid_list))])
+        sql = text(f"""
+            SELECT 
+                callid,
+                sequence,
+                question,
+                answer_text
+            FROM {table_name}
+            WHERE callid IN ({placeholders})
+              AND notify = 'asrmessage_notify'
+            ORDER BY callid, sequence ASC
+        """)
+        
+        params = {f'callid_{i}': callid for i, callid in enumerate(callid_list)}
+        
+        result_map = {}
+        async for session in get_source_db():
+            try:
+                result = await session.execute(sql, params)
+                rows = result.fetchall()
+                
+                # 按 callid 分组
+                current_callid = None
+                current_user_text = []
+                current_labels = []
+                
+                for row in rows:
+                    if row.callid != current_callid:
+                        # 保存上一个 callid 的数据
+                        if current_callid:
+                            result_map[current_callid] = {
+                                'user_text': ' '.join(current_user_text),
+                                'asr_labels': current_labels,
+                            }
+                        # 开始新的 callid
+                        current_callid = row.callid
+                        current_user_text = []
+                        current_labels = []
+                    
+                    # 收集用户说话内容
+                    if row.question:
+                        current_user_text.append(row.question)
+                    
+                    # 收集 ASR 标签（answer_text 可能包含标签如 Q7-满分）
+                    if row.answer_text and ('Q' in row.answer_text or '满' in row.answer_text):
+                        current_labels.append(row.answer_text)
+                
+                # 保存最后一个 callid 的数据
+                if current_callid:
+                    result_map[current_callid] = {
+                        'user_text': ' '.join(current_user_text),
+                        'asr_labels': current_labels,
+                    }
+                    
+            except Exception as e:
+                logger.error(f"批量获取 ASR 详情失败: {e}")
+        
+        return result_map
+    
+    async def _batch_update_analysis_results(
+        self,
+        updates: list[dict],
+    ) -> None:
+        """批量更新分析结果到数据库"""
+        if not updates:
+            return
+            
+        async for session in get_portrait_db():
+            analyzed_at = datetime.now()
+            
+            # 批量执行更新（分批处理避免参数过多）
+            batch_size = 100
+            for i in range(0, len(updates), batch_size):
+                batch = updates[i:i + batch_size]
+                
+                for update in batch:
+                    await session.execute(
+                        text("""
+                            UPDATE call_record_enriched
+                            SET 
+                                satisfaction = :satisfaction,
+                                satisfaction_source = :satisfaction_source,
+                                sentiment = :emotion,
+                                complaint_risk = :complaint_risk,
+                                churn_risk = :churn_risk,
+                                willingness = :willingness,
+                                risk_level = :risk_level,
+                                llm_analyzed_at = :analyzed_at
+                            WHERE callid = :callid
+                        """),
+                        {
+                            "callid": update['callid'],
+                            "satisfaction": update['satisfaction'],
+                            "satisfaction_source": update['satisfaction_source'],
+                            "emotion": update['emotion'],
+                            "complaint_risk": update['complaint_risk'],
+                            "churn_risk": update['churn_risk'],
+                            "willingness": update['willingness'],
+                            "risk_level": update['risk_level'],
+                            "analyzed_at": analyzed_at,
+                        },
+                    )
+                
+                # 每批次提交一次
+                await session.commit()
+                logger.info(f"已更新分析结果: {min(i + batch_size, len(updates))}/{len(updates)}")
 
     async def get_call_details(
         self,
@@ -324,6 +552,114 @@ class ETLService:
             return [CallRecordEnriched(**dict(row._mapping)) for row in rows]
 
         return []
+
+
+    async def sync_task_names(self) -> dict[str, Any]:
+        """
+        同步任务名称到画像系统
+
+        从源数据库获取任务名称，更新到 TaskPortraitSummary 表
+
+        Returns:
+            同步结果统计
+        """
+        if not is_source_db_available():
+            logger.warning("MySQL 源数据库不可用，跳过任务名称同步")
+            return {"status": "skipped", "reason": "source_db_unavailable"}
+
+        logger.info("开始同步任务名称")
+
+        # 从源数据库获取任务信息
+        task_map = await self._fetch_task_names()
+        if not task_map:
+            logger.info("没有需要同步的任务")
+            return {"status": "success", "synced": 0}
+
+        logger.info(f"从源库读取到 {len(task_map)} 个任务")
+
+        # 更新 TaskPortraitSummary 表中的任务名称
+        updated_count = 0
+        async for session in get_portrait_db():
+            try:
+                from src.models import TaskPortraitSummary
+
+                for task_id, task_name in task_map.items():
+                    # 更新所有该任务的汇总记录
+                    stmt = text("""
+                        UPDATE task_portrait_summary
+                        SET task_name = :task_name
+                        WHERE task_id = :task_id AND (task_name IS NULL OR task_name != :task_name)
+                    """)
+                    result = await session.execute(stmt, {"task_id": task_id, "task_name": task_name})
+                    updated_count += result.rowcount
+
+                await session.commit()
+            except Exception as e:
+                logger.error(f"更新任务名称失败: {e}")
+                await session.rollback()
+                raise
+
+        logger.info(f"任务名称同步完成: 更新 {updated_count} 条记录")
+        return {
+            "status": "success",
+            "tasks": len(task_map),
+            "updated": updated_count,
+        }
+
+    async def _fetch_task_names(self) -> dict[str, str]:
+        """
+        从源数据库获取任务名称映射
+
+        Returns:
+            {task_id: task_name} 映射
+        """
+        sql = text("""
+            SELECT uuid, name
+            FROM autodialer_task
+            WHERE name IS NOT NULL AND name != ''
+        """)
+
+        task_map = {}
+        async for session in get_source_db():
+            try:
+                result = await session.execute(sql)
+                rows = result.fetchall()
+
+                for row in rows:
+                    task_map[row.uuid] = row.name
+            except Exception as e:
+                logger.error(f"读取任务名称失败: {e}")
+                raise
+
+        return task_map
+
+    async def get_task_name(self, task_id: str) -> str | None:
+        """
+        获取单个任务的名称
+
+        Args:
+            task_id: 任务UUID
+
+        Returns:
+            任务名称，未找到返回 None
+        """
+        if not is_source_db_available():
+            return None
+
+        sql = text("""
+            SELECT name FROM autodialer_task WHERE uuid = :task_id
+        """)
+
+        async for session in get_source_db():
+            try:
+                result = await session.execute(sql, {"task_id": task_id})
+                row = result.fetchone()
+                return row.name if row else None
+            except Exception as e:
+                logger.error(f"获取任务名称失败: {e}")
+                return None
+
+        return None
 
 
 # 全局服务实例

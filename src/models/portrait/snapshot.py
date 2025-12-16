@@ -35,6 +35,12 @@ class UserPortraitSnapshot(PortraitBase, UUIDPrimaryKeyMixin):
         comment="被呼客户ID",
     )
 
+    phone: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+        comment="客户手机号",
+    )
+
     task_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         nullable=False,
@@ -252,6 +258,109 @@ class UserPortraitSnapshot(PortraitBase, UUIDPrimaryKeyMixin):
         Integer,
         default=0,
         comment="低流失风险次数",
+    )
+
+    # ===========================================
+    # 满意度统计
+    # ===========================================
+
+    satisfied_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="满意次数",
+    )
+
+    neutral_satisfaction_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="一般满意次数",
+    )
+
+    unsatisfied_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="不满意次数",
+    )
+
+    # 最终满意度（多通电话综合后）
+    final_satisfaction: Mapped[Optional[str]] = mapped_column(
+        String(16),
+        nullable=True,
+        comment="最终满意度: satisfied/neutral/unsatisfied",
+    )
+
+    # ===========================================
+    # 情感统计
+    # ===========================================
+
+    final_emotion: Mapped[Optional[str]] = mapped_column(
+        String(16),
+        nullable=True,
+        comment="最终情感: positive/neutral/negative",
+    )
+
+    # ===========================================
+    # 沟通意愿
+    # ===========================================
+
+    willingness: Mapped[Optional[str]] = mapped_column(
+        String(16),
+        nullable=True,
+        comment="沟通意愿: 深度/一般/较低",
+    )
+
+    # 沟通意愿分布统计
+    willingness_deep_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="深度沟通次数",
+    )
+
+    willingness_normal_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="一般沟通次数",
+    )
+
+    willingness_low_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="较低沟通次数",
+    )
+
+    # ===========================================
+    # 综合风险
+    # ===========================================
+
+    risk_level: Mapped[Optional[str]] = mapped_column(
+        String(16),
+        nullable=True,
+        comment="综合风险: churn/complaint/medium/none",
+    )
+
+    # 风险分布统计
+    risk_churn_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="流失风险次数",
+    )
+
+    risk_complaint_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="投诉风险次数",
+    )
+
+    risk_medium_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="一般风险次数",
+    )
+
+    risk_none_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="无风险次数",
     )
 
     # ===========================================

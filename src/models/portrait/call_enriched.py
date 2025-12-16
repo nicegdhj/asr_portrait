@@ -50,6 +50,12 @@ class CallRecordEnriched(PortraitBase, UUIDPrimaryKeyMixin, TimestampMixin):
         comment="被呼客户ID (customer_id)",
     )
 
+    phone: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+        comment="被叫手机号 (callee)",
+    )
+
     call_date: Mapped[date] = mapped_column(
         Date,
         nullable=False,
@@ -135,6 +141,30 @@ class CallRecordEnriched(PortraitBase, UUIDPrimaryKeyMixin, TimestampMixin):
         String(16),
         nullable=True,
         comment="流失风险: low/medium/high",
+    )
+
+    satisfaction: Mapped[Optional[str]] = mapped_column(
+        String(16),
+        nullable=True,
+        comment="满意度: satisfied/neutral/unsatisfied",
+    )
+
+    satisfaction_source: Mapped[Optional[str]] = mapped_column(
+        String(16),
+        nullable=True,
+        comment="满意度来源: asr_tag/score/keyword",
+    )
+
+    willingness: Mapped[Optional[str]] = mapped_column(
+        String(16),
+        nullable=True,
+        comment="沟通意愿: 深度/一般/较低",
+    )
+
+    risk_level: Mapped[Optional[str]] = mapped_column(
+        String(16),
+        nullable=True,
+        comment="综合风险: churn(流失)/complaint(投诉)/medium(一般)/none(无风险)",
     )
 
     llm_analyzed_at: Mapped[Optional[datetime]] = mapped_column(

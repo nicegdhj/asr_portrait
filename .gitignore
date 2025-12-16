@@ -110,3 +110,4 @@ Desktop.ini
 # - uv.lock (依赖锁定)
 
 data/
+.cursor/

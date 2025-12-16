@@ -176,6 +176,69 @@ class TaskPortraitSummary(PortraitBase, UUIDPrimaryKeyMixin):
         comment="高流失风险占比",
     )
 
+    # 综合风险（新增）
+    medium_risk_customers: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="一般风险客户数",
+    )
+
+    no_risk_customers: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="无风险客户数",
+    )
+
+    high_risk_rate: Mapped[float] = mapped_column(
+        Float,
+        default=0.0,
+        comment="高风险占比（流失+投诉）",
+    )
+
+    # ===========================================
+    # 情感分布（新增中性）
+    # ===========================================
+
+    neutral_emotion_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="中性情绪客户数",
+    )
+
+    positive_rate: Mapped[float] = mapped_column(
+        Float,
+        default=0.0,
+        comment="正向情感占比",
+    )
+
+    # ===========================================
+    # 沟通意愿分布（新增）
+    # ===========================================
+
+    deep_willingness_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="深度沟通客户数",
+    )
+
+    normal_willingness_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="一般沟通客户数",
+    )
+
+    low_willingness_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        comment="较低沟通客户数",
+    )
+
+    deep_willingness_rate: Mapped[float] = mapped_column(
+        Float,
+        default=0.0,
+        comment="深度沟通占比",
+    )
+
     # ===========================================
     # 元数据
     # ===========================================

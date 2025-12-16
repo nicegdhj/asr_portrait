@@ -310,6 +310,30 @@ async def trigger_task_summary(request: ComputeRequest):
         return ApiResponse.error(code=500, message=f"计算失败: {str(e)}")
 
 
+@router.post(
+    "/sync-task-names",
+    response_model=ApiResponse[dict],
+    summary="同步任务名称",
+    description="从源数据库同步任务名称到画像系统",
+)
+async def sync_task_names():
+    """
+    同步任务名称
+
+    从源数据库的 autodialer_task 表读取任务名称，更新到 task_portrait_summary 表
+    """
+    from src.services.etl_service import etl_service
+
+    logger.info("[API] 手动触发任务名称同步")
+
+    try:
+        result = await etl_service.sync_task_names()
+        return ApiResponse.success(data=result)
+    except Exception as e:
+        logger.error(f"任务名称同步失败: {e}")
+        return ApiResponse.error(code=500, message=f"同步失败: {str(e)}")
+
+
 @router.get(
     "/periods/status",
     response_model=ApiResponse[dict],

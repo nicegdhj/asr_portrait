@@ -203,14 +203,7 @@ uv run alembic revision --autogenerate -m "描述"
 
 3. **定时任务**: 本地开发建议禁用 (`SCHEDULER_ENABLED=false`)。
 
-## 后续开发计划
 
-- [x] Phase 1: 基础框架 (API、数据库、工具)
-- [ ] Phase 2: 数据抽取层 (ETL)
-- [ ] Phase 3: LLM 分析层
-- [ ] Phase 4: 画像聚合层
-- [ ] Phase 5: 可视化支持
-- [ ] Phase 6: 生产部署优化
 
 ## 许可证
 
