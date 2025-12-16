@@ -23,7 +23,7 @@ export async function fetchTasks(
     const params: Record<string, any> = { limit }
     if (periodType) params.period_type = periodType
     if (periodKey) params.period_key = periodKey
-    
+
     const res = await api.get<ApiResponse<Task[]>>('/task', { params })
     return res.data.data
 }
@@ -53,21 +53,42 @@ export async function fetchTaskTrend(
     return res.data.data
 }
 
+// 筛选参数类型
+interface CustomerFilters {
+    phone?: string
+    satisfaction?: string
+    emotion?: string
+    risk_level?: string
+    willingness?: string
+}
+
 // 获取客户列表（真实 API）
 export async function fetchCustomers(
     taskId: string,
     periodType: PeriodType,
     periodKey: string,
     page = 1,
-    pageSize = 15
+    pageSize = 15,
+    filters?: CustomerFilters
 ): Promise<{ list: Customer[]; total: number }> {
+    const params: Record<string, any> = {
+        period_type: periodType,
+        period_key: periodKey,
+        page,
+        page_size: pageSize,
+    }
+
+    // 添加筛选参数
+    if (filters) {
+        if (filters.phone) params.phone = filters.phone
+        if (filters.satisfaction) params.satisfaction = filters.satisfaction
+        if (filters.emotion) params.emotion = filters.emotion
+        if (filters.risk_level) params.risk_level = filters.risk_level
+        if (filters.willingness) params.willingness = filters.willingness
+    }
+
     const res = await api.get<ApiResponse<CustomerListResponse>>(`/task/${taskId}/customers`, {
-        params: {
-            period_type: periodType,
-            period_key: periodKey,
-            page,
-            page_size: pageSize,
-        },
+        params,
     })
     return {
         list: res.data.data.list,

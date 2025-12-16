@@ -3,18 +3,6 @@
     <!-- 页面头部 -->
     <header class="page-header">
       <h1 class="page-title">人群画像统计与分析</h1>
-      <div class="header-actions">
-        <el-input
-          v-model="searchKeyword"
-          placeholder="搜索客户..."
-          :prefix-icon="Search"
-          style="width: 200px"
-          clearable
-        />
-        <el-button type="primary" :icon="DataAnalysis">
-          导出分析报告
-        </el-button>
-      </div>
     </header>
 
     <!-- 筛选条 -->
@@ -85,15 +73,6 @@
           </div>
         </div>
         <div class="overview-card">
-          <div class="overview-icon" style="background: #F6FFED;">
-            <el-icon :size="24" color="var(--success-color)"><CircleCheck /></el-icon>
-          </div>
-          <div class="overview-info">
-            <span class="overview-value">{{ formatPercent(summary?.connect_rate) }}</span>
-            <span class="overview-label">接通率</span>
-          </div>
-        </div>
-        <div class="overview-card">
           <div class="overview-icon" style="background: #FFF7E6;">
             <el-icon :size="24" color="var(--warning-color)"><Timer /></el-icon>
           </div>
@@ -134,7 +113,18 @@
       <!-- 画像趋势变化 -->
       <div class="stats-grid">
         <div class="card" style="grid-column: span 2;">
-          <h3 class="card-title">画像趋势变化（4个维度）</h3>
+          <div class="card-header-with-action">
+            <h3 class="card-title">画像趋势变化（4个维度）</h3>
+            <el-select
+              v-model="trendLimit"
+              style="width: 100px"
+              @change="handleTrendLimitChange"
+            >
+              <el-option label="最近4周" :value="4" />
+              <el-option label="最近8周" :value="8" />
+              <el-option label="最近12周" :value="12" />
+            </el-select>
+          </div>
           <div class="chart-container" ref="lineChartRef"></div>
         </div>
       </div>
@@ -144,35 +134,63 @@
         <div class="table-header">
           <h3 class="card-title" style="margin-bottom: 0">用户画像明细列表</h3>
           <div class="table-actions">
-            <span class="filter-label">筛选场景:</span>
-            <el-select
-              v-model="tableTaskFilter"
-              placeholder="全部场景"
-              style="width: 200px"
-              clearable
-              @change="handleTableTaskFilterChange"
-            >
-              <el-option label="全部场景" value="" />
-              <el-option
-                v-for="task in tasks"
-                :key="task.task_id"
-                :label="getTaskLabel(task)"
-                :value="task.task_id"
-              />
-            </el-select>
             <el-input
               v-model="tableSearchKeyword"
-              placeholder="搜索用户ID/手机号..."
+              placeholder="搜索手机号..."
               :prefix-icon="Search"
-              style="width: 180px"
+              style="width: 150px"
               clearable
             />
-            <el-button :icon="Download" @click="exportData">导出数据</el-button>
+            <el-select
+              v-model="satisfactionFilter"
+              placeholder="满意度"
+              style="width: 100px"
+              clearable
+              @change="handleFilterChange"
+            >
+              <el-option label="满意" value="satisfied" />
+              <el-option label="一般" value="neutral" />
+              <el-option label="不满意" value="unsatisfied" />
+            </el-select>
+            <el-select
+              v-model="emotionFilter"
+              placeholder="情感"
+              style="width: 90px"
+              clearable
+              @change="handleFilterChange"
+            >
+              <el-option label="正向" value="positive" />
+              <el-option label="中性" value="neutral" />
+              <el-option label="负向" value="negative" />
+            </el-select>
+            <el-select
+              v-model="riskFilter"
+              placeholder="风险"
+              style="width: 110px"
+              clearable
+              @change="handleFilterChange"
+            >
+              <el-option label="流失风险" value="churn" />
+              <el-option label="投诉风险" value="complaint" />
+              <el-option label="一般" value="medium" />
+              <el-option label="无风险" value="none" />
+            </el-select>
+            <el-select
+              v-model="willingnessFilter"
+              placeholder="沟通意愿"
+              style="width: 110px"
+              clearable
+              @change="handleFilterChange"
+            >
+              <el-option label="深度" value="深度" />
+              <el-option label="一般" value="一般" />
+              <el-option label="较低" value="较低" />
+            </el-select>
           </div>
         </div>
         
         <el-table
-          :data="filteredCustomerList"
+          :data="customerList"
           style="width: 100%"
           :header-cell-style="{ background: '#F5F7FA', color: '#1F2329', fontWeight: 600 }"
           stripe
@@ -249,7 +267,7 @@
             :page-size="pageSize"
             :total="customerTotal"
             layout="total, prev, pager, next, jumper"
-            @current-change="loadCustomers"
+            @current-change="handlePageChange"
           />
         </div>
       </div>
@@ -259,14 +277,13 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { Filter, DataAnalysis, Download, Search, Refresh, User, Phone, CircleCheck, Timer } from '@element-plus/icons-vue'
+import { Filter, Search, Refresh, User, Phone, CircleCheck, Timer } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import { fetchTasks, fetchTaskSummary, fetchTaskTrend, fetchCustomers, fetchAvailablePeriods, getRecentPeriods } from '@/api'
 import type { Task, TaskSummary, Customer, PeriodType, TrendPoint, AvailablePeriod } from '@/types'
 
 // 状态
 const loading = ref(false)
-const searchKeyword = ref('')
 const tasks = ref<Task[]>([])
 const selectedTaskId = ref('')
 const periodType = ref<PeriodType>('week')  // 固定按周统计
@@ -285,7 +302,14 @@ const pageSize = 15
 const tableTaskFilter = ref('')
 const tableSearchKeyword = ref('')
 
+// 新增筛选状态
+const satisfactionFilter = ref('')  // 满意度筛选
+const emotionFilter = ref('')       // 情感筛选
+const riskFilter = ref('')          // 风险筛选
+const willingnessFilter = ref('')   // 沟通意愿筛选
+
 // 趋势数据（4个维度）
+const trendLimit = ref(8)  // 趋势图显示周数
 const trendData = ref<{
   satisfaction: TrendPoint[]  // 满意度趋势（满意比例）
   risk: TrendPoint[]          // 风险趋势（流失+投诉比例）
@@ -320,24 +344,113 @@ const availablePeriods = computed(() => {
   return getRecentPeriods(periodType.value, 12)
 })
 
-// 过滤客户列表（支持关键词搜索，场景筛选通过 API 实现）
+// 过滤客户列表（支持关键词搜索和多维度筛选）
 const filteredCustomerList = computed(() => {
   let result = customerList.value
   
-  // 按关键词搜索
+  // 按手机号搜索
   if (tableSearchKeyword.value) {
     const keyword = tableSearchKeyword.value.toLowerCase()
     result = result.filter(c => 
-      c.customer_id.toLowerCase().includes(keyword) ||
-      (c.phone && c.phone.includes(keyword))
+      c.phone && c.phone.includes(keyword)
     )
+  }
+  
+  // 满意度筛选
+  if (satisfactionFilter.value) {
+    result = result.filter(c => c.satisfaction === satisfactionFilter.value)
+  }
+  
+  // 情感筛选
+  if (emotionFilter.value) {
+    result = result.filter(c => c.emotion === emotionFilter.value)
+  }
+  
+  // 风险筛选
+  if (riskFilter.value) {
+    result = result.filter(c => c.risk_level === riskFilter.value)
+  }
+  
+  // 沟通意愿筛选
+  if (willingnessFilter.value) {
+    result = result.filter(c => c.willingness === willingnessFilter.value)
   }
   
   return result
 })
 
-// 获取周期标签
+// 是否有激活的筛选条件
+const hasActiveFilter = computed(() => {
+  return !!tableSearchKeyword.value || 
+         !!satisfactionFilter.value || 
+         !!emotionFilter.value || 
+         !!riskFilter.value || 
+         !!willingnessFilter.value
+})
+
+// 显示的总数（有筛选时用筛选后的数量，无筛选时用后端返回的总数）
+const displayTotal = computed(() => {
+  return hasActiveFilter.value ? filteredCustomerList.value.length : customerTotal.value
+})
+
+// 显示的客户列表（有筛选时用筛选后的数据，无筛选时用原始数据）
+const displayCustomerList = computed(() => {
+  return hasActiveFilter.value ? filteredCustomerList.value : customerList.value
+})
+
+// 获取周的日期范围
+function getWeekDateRange(periodKey: string): { start: string; end: string } {
+  // 解析 2025-W48 格式
+  const match = periodKey.match(/^(\d{4})-W(\d{2})$/)
+  if (!match) return { start: '', end: '' }
+  
+  const year = parseInt(match[1])
+  const week = parseInt(match[2])
+  
+  // 计算该年第一周的周一
+  const jan1 = new Date(year, 0, 1)
+  const dayOfWeek = jan1.getDay() || 7  // 周日为7
+  
+  // ISO周：第一周是包含当年第一个周四的周
+  let firstMonday: Date
+  if (dayOfWeek <= 4) {
+    firstMonday = new Date(year, 0, 1 - dayOfWeek + 1)  // 当周的周一
+  } else {
+    firstMonday = new Date(year, 0, 1 + (8 - dayOfWeek))  // 下周的周一
+  }
+  
+  // 计算目标周的周一
+  const targetMonday = new Date(firstMonday)
+  targetMonday.setDate(firstMonday.getDate() + (week - 1) * 7)
+  
+  // 计算周日
+  const targetSunday = new Date(targetMonday)
+  targetSunday.setDate(targetMonday.getDate() + 6)
+  
+  const formatDate = (d: Date) => `${d.getMonth() + 1}月${d.getDate()}日`
+  
+  return {
+    start: formatDate(targetMonday),
+    end: formatDate(targetSunday)
+  }
+}
+
+// 获取周期标签（显示日期范围）
 function getPeriodLabel(periodKey: string): string {
+  const range = getWeekDateRange(periodKey)
+  if (range.start && range.end) {
+    return `${periodKey}(${range.start}~${range.end})`
+  }
+  return periodKey
+}
+
+// 获取简短的周期标签（用于趋势图横坐标）
+function getPeriodShortLabel(periodKey: string): string {
+  const range = getWeekDateRange(periodKey)
+  if (range.start && range.end) {
+    // 仅显示开始日期
+    return `${periodKey.replace(/^\d{4}-/, '')}(${range.start})`
+  }
   return periodKey
 }
 
@@ -475,16 +588,17 @@ function updateLineChart() {
   const emotionData = trendData.value.emotion
   const willingnessData = trendData.value.willingness
 
-  // 获取所有周期标签
+  // 获取所有周期标签（使用简短格式显示日期范围）
+  // 后端返回的数据已按时间顺序排列（旧→新），无需反转
   const periods = satisfactionData.length > 0 
-    ? satisfactionData.map(p => p.period).reverse()
-    : availablePeriods.value.slice(0, 8).reverse()
+    ? satisfactionData.map(p => getPeriodShortLabel(p.period))
+    : availablePeriods.value.slice(0, trendLimit.value).map(p => getPeriodShortLabel(p))
 
   // 提取值，转换为百分比
-  const satisfactionValues = satisfactionData.map(p => (p.value * 100).toFixed(1)).reverse()
-  const riskValues = riskData.map(p => (p.value * 100).toFixed(1)).reverse()
-  const emotionValues = emotionData.map(p => (p.value * 100).toFixed(1)).reverse()
-  const willingnessValues = willingnessData.map(p => (p.value * 100).toFixed(1)).reverse()
+  const satisfactionValues = satisfactionData.map(p => (p.value * 100).toFixed(1))
+  const riskValues = riskData.map(p => (p.value * 100).toFixed(1))
+  const emotionValues = emotionData.map(p => (p.value * 100).toFixed(1))
+  const willingnessValues = willingnessData.map(p => (p.value * 100).toFixed(1))
 
   lineChart.setOption({
     tooltip: { 
@@ -639,11 +753,12 @@ async function loadTrends() {
     // 风险趋势：分子为"流失风险"+"投诉风险"的比例
     // 情感趋势：分子为"正向"的比例
     // 沟通意愿趋势：分子为"深度"的比例
+    const limit = trendLimit.value
     const [satisfactionTrend, riskTrend, emotionTrend, willingnessTrend] = await Promise.all([
-      fetchTaskTrend(selectedTaskId.value, 'week', 'satisfied_rate', 8),
-      fetchTaskTrend(selectedTaskId.value, 'week', 'high_risk_rate', 8),  // 综合风险率
-      fetchTaskTrend(selectedTaskId.value, 'week', 'positive_rate', 8),   // 正向情感率
-      fetchTaskTrend(selectedTaskId.value, 'week', 'deep_willingness_rate', 8),  // 深度沟通率
+      fetchTaskTrend(selectedTaskId.value, 'week', 'satisfied_rate', limit),
+      fetchTaskTrend(selectedTaskId.value, 'week', 'high_risk_rate', limit),  // 综合风险率
+      fetchTaskTrend(selectedTaskId.value, 'week', 'positive_rate', limit),   // 正向情感率
+      fetchTaskTrend(selectedTaskId.value, 'week', 'deep_willingness_rate', limit),  // 深度沟通率
     ])
     
     trendData.value = {
@@ -679,7 +794,16 @@ async function loadCustomers() {
   if (!taskId || !selectedPeriod.value) return
 
   try {
-    const result = await fetchCustomers(taskId, periodType.value, selectedPeriod.value, currentPage.value, pageSize)
+    // 构建筛选参数
+    const filters = {
+      phone: tableSearchKeyword.value || undefined,
+      satisfaction: satisfactionFilter.value || undefined,
+      emotion: emotionFilter.value || undefined,
+      risk_level: riskFilter.value || undefined,
+      willingness: willingnessFilter.value || undefined,
+    }
+    
+    const result = await fetchCustomers(taskId, periodType.value, selectedPeriod.value, currentPage.value, pageSize, filters)
     customerList.value = result.list
     customerTotal.value = result.total
   } catch (e) {
@@ -720,6 +844,23 @@ async function handlePeriodChange() {
 function handleTableTaskFilterChange() {
   currentPage.value = 1
   loadCustomers()
+}
+
+// 筛选条件变化（满意度、情感、风险、沟通意愿）
+function handleFilterChange() {
+  currentPage.value = 1
+  loadCustomers()  // 重新请求后端
+}
+
+// 分页变化
+function handlePageChange(page: number) {
+  currentPage.value = page
+  loadCustomers()  // 重新请求后端
+}
+
+// 趋势图周数选择变化
+function handleTrendLimitChange() {
+  loadTrends()
 }
 
 // 格式化函数
@@ -869,10 +1010,22 @@ onUnmounted(() => {
   gap: 8px;
 }
 
+/* 卡片标题带操作 */
+.card-header-with-action {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.card-header-with-action .card-title {
+  margin-bottom: 0;
+}
+
 /* 概览卡片 */
 .overview-cards {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
   margin-bottom: 24px;
 }

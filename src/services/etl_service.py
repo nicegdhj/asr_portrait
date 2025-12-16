@@ -77,12 +77,12 @@ class ETLService:
                     raise
 
         logger.info(f"同步完成: {synced_count} 条记录")
-        
+
         # 分析已同步的记录（获取 ASR 并进行规则分析）
         if synced_count > 0:
             analyzed_count = await self.analyze_call_records(target_date)
             logger.info(f"已分析 {analyzed_count} 条记录")
-        
+
         return {
             "status": "success",
             "synced": synced_count,
@@ -230,69 +230,71 @@ class ETLService:
     ) -> int:
         """
         分析指定日期的通话记录
-        
+
         获取 ASR 详情并进行规则引擎分析
-        
+
         Args:
             target_date: 目标日期
             batch_size: 批量处理大小
-            
+
         Returns:
             分析的记录数
         """
         if not is_source_db_available():
             return 0
-        
+
         # 获取需要分析的记录（已接通但未分析的）
         records_to_analyze = await self._get_records_for_analysis(target_date)
-        
+
         if not records_to_analyze:
             return 0
-        
+
         logger.info(f"需要分析 {len(records_to_analyze)} 条通话记录")
-        
+
         # 批量获取 ASR 详情
         asr_data = await self._batch_fetch_asr_details(
-            [(r['callid'], target_date) for r in records_to_analyze],
+            [(r["callid"], target_date) for r in records_to_analyze],
             target_date,
         )
-        
+
         # 分析并批量更新
         analyzed_count = 0
         updates = []
-        
+
         for record in records_to_analyze:
-            callid = record['callid']
-            
+            callid = record["callid"]
+
             # 获取该通话的 ASR 数据
-            call_asr = asr_data.get(callid, {'user_text': '', 'asr_labels': []})
-            
+            call_asr = asr_data.get(callid, {"user_text": "", "asr_labels": []})
+
             # 调用规则引擎分析
             result = rule_engine.analyze_call(
-                user_text=call_asr.get('user_text', ''),
-                asr_labels=call_asr.get('asr_labels', []),
-                duration=record.get('bill', 0) // 1000,  # 毫秒转秒
-                rounds=record.get('rounds', 0),
+                user_text=call_asr.get("user_text", ""),
+                asr_labels=call_asr.get("asr_labels", []),
+                duration=record.get("bill", 0) // 1000,  # 毫秒转秒
+                rounds=record.get("rounds", 0),
             )
-            
-            updates.append({
-                'callid': callid,
-                'satisfaction': result.satisfaction,
-                'satisfaction_source': result.satisfaction_source,
-                'emotion': result.emotion,
-                'complaint_risk': result.complaint_risk,
-                'churn_risk': result.churn_risk,
-                'willingness': result.willingness,
-                'risk_level': result.risk_level,
-            })
+
+            updates.append(
+                {
+                    "callid": callid,
+                    "satisfaction": result.satisfaction,
+                    "satisfaction_source": result.satisfaction_source,
+                    "emotion": result.emotion,
+                    "complaint_risk": result.complaint_risk,
+                    "churn_risk": result.churn_risk,
+                    "willingness": result.willingness,
+                    "risk_level": result.risk_level,
+                }
+            )
             analyzed_count += 1
-        
+
         # 批量更新
         if updates:
             await self._batch_update_analysis_results(updates)
-        
+
         return analyzed_count
-    
+
     async def _get_records_for_analysis(self, target_date: date) -> list[dict]:
         """获取需要分析的记录"""
         async for session in get_portrait_db():
@@ -308,7 +310,7 @@ class ETLService:
             )
             return [dict(row._mapping) for row in result.fetchall()]
         return []
-    
+
     async def _batch_fetch_asr_details(
         self,
         call_ids: list[tuple[str, date]],
@@ -316,22 +318,22 @@ class ETLService:
     ) -> dict[str, dict]:
         """
         批量获取 ASR 详情
-        
+
         Returns:
             {callid: {'user_text': str, 'asr_labels': list}}
         """
         if not call_ids:
             return {}
-        
+
         # 获取表名
         table_name = get_call_record_detail_table(target_date)
-        
+
         # 提取所有 callid
         callid_list = [c[0] for c in call_ids]
-        
+
         # 批量查询 ASR 详情
         # 使用 IN 查询一次获取所有数据
-        placeholders = ', '.join([f':callid_{i}' for i in range(len(callid_list))])
+        placeholders = ", ".join([f":callid_{i}" for i in range(len(callid_list))])
         sql = text(f"""
             SELECT 
                 callid,
@@ -343,97 +345,112 @@ class ETLService:
               AND notify = 'asrmessage_notify'
             ORDER BY callid, sequence ASC
         """)
-        
-        params = {f'callid_{i}': callid for i, callid in enumerate(callid_list)}
-        
+
+        params = {f"callid_{i}": callid for i, callid in enumerate(callid_list)}
+
         result_map = {}
         async for session in get_source_db():
             try:
                 result = await session.execute(sql, params)
                 rows = result.fetchall()
-                
+
                 # 按 callid 分组
                 current_callid = None
                 current_user_text = []
                 current_labels = []
-                
+
                 for row in rows:
                     if row.callid != current_callid:
                         # 保存上一个 callid 的数据
                         if current_callid:
                             result_map[current_callid] = {
-                                'user_text': ' '.join(current_user_text),
-                                'asr_labels': current_labels,
+                                "user_text": " ".join(current_user_text),
+                                "asr_labels": current_labels,
                             }
                         # 开始新的 callid
                         current_callid = row.callid
                         current_user_text = []
                         current_labels = []
-                    
+
                     # 收集用户说话内容
                     if row.question:
                         current_user_text.append(row.question)
-                    
+
                     # 收集 ASR 标签（answer_text 可能包含标签如 Q7-满分）
-                    if row.answer_text and ('Q' in row.answer_text or '满' in row.answer_text):
+                    if row.answer_text and ("Q" in row.answer_text or "满" in row.answer_text):
                         current_labels.append(row.answer_text)
-                
+
                 # 保存最后一个 callid 的数据
                 if current_callid:
                     result_map[current_callid] = {
-                        'user_text': ' '.join(current_user_text),
-                        'asr_labels': current_labels,
+                        "user_text": " ".join(current_user_text),
+                        "asr_labels": current_labels,
                     }
-                    
+
             except Exception as e:
                 logger.error(f"批量获取 ASR 详情失败: {e}")
-        
+
         return result_map
-    
+
     async def _batch_update_analysis_results(
         self,
         updates: list[dict],
     ) -> None:
-        """批量更新分析结果到数据库"""
+        """批量更新分析结果到数据库（优化版：使用 VALUES 批量更新）"""
         if not updates:
             return
-            
+
         async for session in get_portrait_db():
             analyzed_at = datetime.now()
-            
+
             # 批量执行更新（分批处理避免参数过多）
             batch_size = 100
             for i in range(0, len(updates), batch_size):
-                batch = updates[i:i + batch_size]
-                
-                for update in batch:
-                    await session.execute(
-                        text("""
-                            UPDATE call_record_enriched
-                            SET 
-                                satisfaction = :satisfaction,
-                                satisfaction_source = :satisfaction_source,
-                                sentiment = :emotion,
-                                complaint_risk = :complaint_risk,
-                                churn_risk = :churn_risk,
-                                willingness = :willingness,
-                                risk_level = :risk_level,
-                                llm_analyzed_at = :analyzed_at
-                            WHERE callid = :callid
-                        """),
-                        {
-                            "callid": update['callid'],
-                            "satisfaction": update['satisfaction'],
-                            "satisfaction_source": update['satisfaction_source'],
-                            "emotion": update['emotion'],
-                            "complaint_risk": update['complaint_risk'],
-                            "churn_risk": update['churn_risk'],
-                            "willingness": update['willingness'],
-                            "risk_level": update['risk_level'],
-                            "analyzed_at": analyzed_at,
-                        },
+                batch = updates[i : i + batch_size]
+
+                # 构建 VALUES 子句和参数
+                values_parts = []
+                params = {"analyzed_at": analyzed_at}
+
+                for idx, update in enumerate(batch):
+                    values_parts.append(
+                        f"(:callid_{idx}, :satisfaction_{idx}, :satisfaction_source_{idx}, "
+                        f":emotion_{idx}, :complaint_risk_{idx}, :churn_risk_{idx}, "
+                        f":willingness_{idx}, :risk_level_{idx})"
                     )
-                
+                    params[f"callid_{idx}"] = update["callid"]
+                    params[f"satisfaction_{idx}"] = update["satisfaction"]
+                    params[f"satisfaction_source_{idx}"] = update["satisfaction_source"]
+                    params[f"emotion_{idx}"] = update["emotion"]
+                    params[f"complaint_risk_{idx}"] = update["complaint_risk"]
+                    params[f"churn_risk_{idx}"] = update["churn_risk"]
+                    params[f"willingness_{idx}"] = update["willingness"]
+                    params[f"risk_level_{idx}"] = update["risk_level"]
+
+                # 使用 PostgreSQL VALUES + UPDATE FROM 语法批量更新
+                values_sql = ", ".join(values_parts)
+                await session.execute(
+                    text(f"""
+                        UPDATE call_record_enriched AS c
+                        SET 
+                            satisfaction = v.satisfaction,
+                            satisfaction_source = v.satisfaction_source,
+                            sentiment = v.emotion,
+                            complaint_risk = v.complaint_risk,
+                            churn_risk = v.churn_risk,
+                            willingness = v.willingness,
+                            risk_level = v.risk_level,
+                            llm_analyzed_at = :analyzed_at
+                        FROM (VALUES {values_sql}) AS v(
+                            callid, satisfaction, satisfaction_source, 
+                            emotion, complaint_risk, churn_risk, 
+                            willingness, risk_level
+                        )
+                        WHERE c.callid = v.callid
+                    """),
+                    params,
+                )
+
                 # 每批次提交一次
                 await session.commit()
                 logger.info(f"已更新分析结果: {min(i + batch_size, len(updates))}/{len(updates)}")
@@ -552,7 +569,6 @@ class ETLService:
             return [CallRecordEnriched(**dict(row._mapping)) for row in rows]
 
         return []
-
 
     async def sync_task_names(self) -> dict[str, Any]:
         """

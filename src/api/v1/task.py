@@ -62,7 +62,7 @@ class TaskTrendResponse(BaseModel):
 
 class AvailablePeriod(BaseModel):
     """可用周期"""
-    
+
     period_type: str = Field(..., description="周期类型")
     period_key: str = Field(..., description="周期编号")
     total_users: int = Field(default=0, description="用户数")
@@ -86,7 +86,7 @@ async def list_available_periods(
 ):
     """
     获取可用周期列表
-    
+
     返回已完成计算且有数据的周期列表
     """
     stmt = (
@@ -175,6 +175,20 @@ async def get_task_summary(
                     "high_complaint_rate": summary.high_complaint_rate,
                     "high_churn": summary.high_churn_customers,
                     "high_churn_rate": summary.high_churn_rate,
+                    "medium": summary.medium_risk_customers,
+                    "none": summary.no_risk_customers,
+                },
+                emotion={
+                    "positive": summary.positive_count,
+                    "positive_rate": summary.positive_rate,
+                    "neutral": summary.neutral_emotion_count,
+                    "negative": summary.negative_count,
+                },
+                willingness={
+                    "deep": summary.deep_willingness_count,
+                    "deep_rate": summary.deep_willingness_rate,
+                    "normal": summary.normal_willingness_count,
+                    "low": summary.low_willingness_count,
                 },
             )
         )
@@ -250,8 +264,11 @@ async def get_task_trend(
         "satisfied_rate",
         "high_complaint_rate",
         "high_churn_rate",
+        "high_risk_rate",  # 综合风险率（投诉+流失）
+        "positive_rate",  # 正向情感率
+        "deep_willingness_rate",  # 深度沟通率
         "avg_duration",
-    ] = Query(default="connect_rate", description="指标名称"),
+    ] = Query(default="satisfied_rate", description="指标名称"),
     limit: int = Query(default=12, description="返回周期数", ge=1, le=52),
 ):
     """
@@ -267,6 +284,29 @@ async def get_task_trend(
     except ValueError:
         return ApiResponse.error(code=400, message=f"无效的任务ID: {task_id}")
 
+    # 生成最近 limit 个周期的列表
+    from datetime import date, timedelta
+
+    def get_week_key(d: date) -> str:
+        """获取日期对应的 ISO 周编号"""
+        iso_year, iso_week, _ = d.isocalendar()
+        return f"{iso_year}-W{iso_week:02d}"
+
+    # 从当前日期倒推生成周期列表
+    today = date.today()
+    all_periods = []
+    current_date = today
+    for _ in range(limit):
+        week_key = get_week_key(current_date)
+        if week_key not in all_periods:
+            all_periods.append(week_key)
+        if len(all_periods) >= limit:
+            break
+        current_date -= timedelta(days=7)
+
+    # 按时间升序排列（旧→新）
+    all_periods = list(reversed(all_periods))
+
     # 查询历史数据
     stmt = (
         select(
@@ -276,15 +316,18 @@ async def get_task_trend(
         .where(
             TaskPortraitSummary.task_id == task_uuid,
             TaskPortraitSummary.period_type == period_type,
+            TaskPortraitSummary.period_key.in_(all_periods),
         )
-        .order_by(TaskPortraitSummary.period_key.desc())
-        .limit(limit)
+        .order_by(TaskPortraitSummary.period_key)
     )
     result = await db.execute(stmt)
     rows = result.all()
 
-    # 倒序排列（时间升序）
-    series = [TrendPoint(period=row[0], value=float(row[1] or 0)) for row in reversed(rows)]
+    # 构建数据字典
+    data_map = {row[0]: float(row[1] or 0) for row in rows}
+
+    # 填充所有周期（没有数据的填 0）
+    series = [TrendPoint(period=period, value=data_map.get(period, 0.0)) for period in all_periods]
 
     return ApiResponse.success(
         data=TaskTrendResponse(
@@ -309,7 +352,7 @@ async def list_tasks(
 ):
     """
     获取场景列表
-    
+
     - 如果传入 period_key，返回该周期内有数据的场景及其客户数
     - 如果不传 period_key，返回所有有数据的场景
     """
@@ -346,9 +389,11 @@ async def list_tasks(
         # 不指定周期：从原始表统计所有场景
         # 先获取任务名称映射
         task_name_map = {}
-        name_stmt = select(TaskPortraitSummary.task_id, TaskPortraitSummary.task_name).where(
-            TaskPortraitSummary.task_name.isnot(None)
-        ).distinct(TaskPortraitSummary.task_id)
+        name_stmt = (
+            select(TaskPortraitSummary.task_id, TaskPortraitSummary.task_name)
+            .where(TaskPortraitSummary.task_name.isnot(None))
+            .distinct(TaskPortraitSummary.task_id)
+        )
         name_result = await db.execute(name_stmt)
         for row in name_result.all():
             task_name_map[str(row.task_id)] = row.task_name
@@ -395,7 +440,9 @@ class CustomerListItem(BaseModel):
     avg_duration: float = Field(default=0.0, description="平均通话时长(秒)")
     satisfaction: Optional[str] = Field(default=None, description="满意度: satisfied/neutral/unsatisfied")
     emotion: Optional[str] = Field(default=None, description="情感: positive/neutral/negative")
-    risk_level: Optional[str] = Field(default=None, description="风险: churn(流失)/complaint(投诉)/medium(一般)/none(无)")
+    risk_level: Optional[str] = Field(
+        default=None, description="风险: churn(流失)/complaint(投诉)/medium(一般)/none(无)"
+    )
     willingness: Optional[str] = Field(default=None, description="沟通意愿: 深度/一般/较低")
 
 
@@ -412,7 +459,7 @@ class CustomerListResponse(BaseModel):
     "/{task_id}/customers",
     response_model=ApiResponse[CustomerListResponse],
     summary="获取任务客户列表",
-    description="获取指定任务的客户画像列表，支持分页",
+    description="获取指定任务的客户画像列表，支持分页和筛选",
 )
 async def get_task_customers(
     db: PortraitDB,
@@ -421,11 +468,17 @@ async def get_task_customers(
     period_key: str = Query(..., description="周期编号，如 2025-W48"),
     page: int = Query(default=1, ge=1, description="页码"),
     page_size: int = Query(default=15, ge=1, le=100, description="每页数量"),
+    # 筛选参数
+    phone: Optional[str] = Query(default=None, description="手机号搜索"),
+    satisfaction: Optional[str] = Query(default=None, description="满意度筛选"),
+    emotion: Optional[str] = Query(default=None, description="情感筛选"),
+    risk_level: Optional[str] = Query(default=None, description="风险筛选"),
+    willingness: Optional[str] = Query(default=None, description="沟通意愿筛选"),
 ):
     """
     获取任务客户列表
 
-    返回指定任务在某周期内的客户画像数据
+    返回指定任务在某周期内的客户画像数据，支持筛选
     """
     try:
         task_uuid = uuid.UUID(task_id)
@@ -436,31 +489,47 @@ async def get_task_customers(
 
     # 获取任务名称
     task_name = None
-    name_stmt = select(TaskPortraitSummary.task_name).where(
-        TaskPortraitSummary.task_id == task_uuid,
-        TaskPortraitSummary.task_name.isnot(None)
-    ).limit(1)
+    name_stmt = (
+        select(TaskPortraitSummary.task_name)
+        .where(TaskPortraitSummary.task_id == task_uuid, TaskPortraitSummary.task_name.isnot(None))
+        .limit(1)
+    )
     name_result = await db.execute(name_stmt)
     name_row = name_result.scalar_one_or_none()
     if name_row:
         task_name = name_row
 
-    # 计算去重后的客户总数
+    # 构建基础筛选条件
+    base_conditions = [
+        UserPortraitSnapshot.task_id == task_uuid,
+        UserPortraitSnapshot.period_type == period_type,
+        UserPortraitSnapshot.period_key == period_key,
+    ]
+
+    # 添加筛选条件
+    if phone:
+        base_conditions.append(UserPortraitSnapshot.phone.ilike(f"%{phone}%"))
+    if satisfaction:
+        base_conditions.append(UserPortraitSnapshot.final_satisfaction == satisfaction)
+    if emotion:
+        base_conditions.append(UserPortraitSnapshot.final_emotion == emotion)
+    if risk_level:
+        base_conditions.append(UserPortraitSnapshot.risk_level == risk_level)
+    if willingness:
+        base_conditions.append(UserPortraitSnapshot.willingness == willingness)
+
+    # 计算去重后的客户总数（带筛选条件）
     count_stmt = (
         select(func.count(func.distinct(UserPortraitSnapshot.customer_id)))
         .select_from(UserPortraitSnapshot)
-        .where(
-            UserPortraitSnapshot.task_id == task_uuid,
-            UserPortraitSnapshot.period_type == period_type,
-            UserPortraitSnapshot.period_key == period_key,
-        )
+        .where(*base_conditions)
     )
     count_result = await db.execute(count_stmt)
     total = count_result.scalar() or 0
 
     # 分页查询客户画像快照（按 customer_id 去重，保留最新/最多通话的记录）
     offset = (page - 1) * page_size
-    
+
     # 使用子查询按 customer_id 去重，聚合数据
     stmt = (
         select(
@@ -474,11 +543,7 @@ async def get_task_customers(
             func.max(UserPortraitSnapshot.risk_level).label("risk_level"),
             func.max(UserPortraitSnapshot.willingness).label("willingness"),
         )
-        .where(
-            UserPortraitSnapshot.task_id == task_uuid,
-            UserPortraitSnapshot.period_type == period_type,
-            UserPortraitSnapshot.period_key == period_key,
-        )
+        .where(*base_conditions)
         .group_by(UserPortraitSnapshot.customer_id)
         .order_by(func.sum(UserPortraitSnapshot.total_calls).desc())
         .offset(offset)
