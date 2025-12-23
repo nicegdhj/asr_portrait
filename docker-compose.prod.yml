@@ -1,0 +1,108 @@
+# Portrait 用户画像系统 - 生产环境 Docker Compose
+# 用于云服务器部署
+#
+# 使用方式:
+#   1. 复制 .env.example 为 .env 并配置
+#   2. docker-compose -f docker-compose.prod.yml up -d
+
+services:
+  # ===========================================
+  # 前端服务 (Nginx + Vue)
+  # ===========================================
+  portrait-web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: portrait-web
+    ports:
+      - "${WEB_PORT:-80}:80"
+    depends_on:
+      portrait-api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - portrait-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # 后端 API 服务 (FastAPI)
+  # ===========================================
+  portrait-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: portrait-api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      # 应用配置
+      - APP_ENV=production
+      - DEBUG=false
+      # PostgreSQL 画像数据库
+      - PORTRAIT_DB_HOST=portrait-postgres
+      - PORTRAIT_DB_PORT=5432
+      - PORTRAIT_DB_USER=${POSTGRES_USER:-portrait}
+      - PORTRAIT_DB_PASSWORD=${POSTGRES_PASSWORD:-portrait123}
+      - PORTRAIT_DB_NAME=${POSTGRES_DB:-portrait}
+      # MySQL 源数据库 (连接线上外呼系统)
+      - SOURCE_DB_HOST=${MYSQL_HOST}
+      - SOURCE_DB_PORT=${MYSQL_PORT:-3306}
+      - SOURCE_DB_USER=${MYSQL_USER}
+      - SOURCE_DB_PASSWORD=${MYSQL_PASSWORD}
+      - SOURCE_DB_NAME=${MYSQL_DB:-outbound_saas}
+      # 调度器配置 (可选)
+      - SCHEDULER_ENABLED=${SCHEDULER_ENABLED:-false}
+      - SYNC_CRON_HOUR=${SYNC_CRON_HOUR:-2}
+    depends_on:
+      portrait-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - portrait-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ===========================================
+  # PostgreSQL 画像数据库
+  # ===========================================
+  portrait-postgres:
+    image: postgres:15-alpine
+    container_name: portrait-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-portrait}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-portrait123}
+      POSTGRES_DB: ${POSTGRES_DB:-portrait}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - portrait-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-portrait} -d ${POSTGRES_DB:-portrait}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# ===========================================
+# 数据卷 (持久化存储)
+# ===========================================
+volumes:
+  postgres_data:
+    driver: local
+
+# ===========================================
+# 网络
+# ===========================================
+networks:
+  portrait-network:
+    driver: bridge
