@@ -14,19 +14,23 @@ from loguru import logger
 from src.api import api_router
 from src.core.config import settings
 from src.core.database import lifespan_db
+from src.core.logging import setup_logging
 from src.schemas import ApiResponse
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    # 初始化日志系统
+    setup_logging()
+
     logger.info(f"启动 {settings.app_name} 服务...")
-    
+
     # 初始化数据库连接
     async with lifespan_db():
         logger.info("数据库连接已建立")
         yield
-    
+
     logger.info("服务已停止")
 
 
@@ -92,7 +96,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 async def health_check():
     """
     健康检查接口
-    
+
     用于 Docker 健康检查和负载均衡探针
     """
     return ApiResponse.success(
@@ -128,7 +132,7 @@ app.include_router(api_router, prefix=settings.api_prefix)
 # 开发环境直接运行
 if __name__ == "__main__":
     import uvicorn
-    
+
     uvicorn.run(
         "src.main:app",
         host=settings.api_host,
@@ -136,4 +140,3 @@ if __name__ == "__main__":
         reload=settings.debug,
         log_level=settings.log_level.lower(),
     )
-

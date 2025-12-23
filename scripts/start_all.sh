@@ -30,7 +30,7 @@ echo "🐍 启动后端服务 (Uvicorn)..."
 if pgrep -f "uvicorn src.main:app" > /dev/null 2>&1; then
     echo "   ⏭️  后端服务已在运行"
 else
-    nohup uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 > /tmp/backend-api.log 2>&1 &
+    nohup uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 > /dev/null 2>&1 &
     echo "   ✅ 后端服务已启动 (http://localhost:8000)"
     sleep 2
 fi
@@ -56,7 +56,8 @@ echo "🐘 数据库:   localhost:5432"
 echo "============================================"
 echo ""
 echo "查看日志:"
-echo "  后端: tail -f /tmp/backend-api.log"
+echo "  后端: tail -f logs/portrait.log"
+echo "  错误: tail -f logs/error.log"
 echo "  前端: tail -f /tmp/vite-dev.log"
 echo ""
 echo "停止服务: ./scripts/stop_all.sh"

@@ -6,8 +6,8 @@ ETL 服务 - 数据抽取与转换
 """
 
 import uuid
-from datetime import date, datetime, timedelta
-from typing import Any, Optional
+from datetime import date, datetime
+from typing import Any
 
 from loguru import logger
 from sqlalchemy import text
@@ -21,7 +21,6 @@ from src.utils.table_utils import (
     get_call_record_table,
     get_call_record_detail_table,
     get_tables_for_period,
-    NUMBER_STATUS_MAP,
 )
 
 
@@ -253,8 +252,7 @@ class ETLService:
 
         # 批量获取 ASR 详情
         asr_data = await self._batch_fetch_asr_details(
-            [(r["callid"], target_date) for r in records_to_analyze],
-            target_date,
+            [(r["callid"], r["call_date"]) for r in records_to_analyze],
         )
 
         # 分析并批量更新
@@ -300,7 +298,7 @@ class ETLService:
         async for session in get_portrait_db():
             result = await session.execute(
                 text("""
-                    SELECT callid, bill, rounds
+                    SELECT callid, bill, rounds, call_date
                     FROM call_record_enriched
                     WHERE call_date = :target_date
                       AND bill > 0
@@ -314,10 +312,12 @@ class ETLService:
     async def _batch_fetch_asr_details(
         self,
         call_ids: list[tuple[str, date]],
-        target_date: date,
     ) -> dict[str, dict]:
         """
-        批量获取 ASR 详情
+        批量获取 ASR 详情 (支持跨月查询)
+
+        Args:
+            call_ids: [(callid, call_date), ...] 通话ID和日期的元组列表
 
         Returns:
             {callid: {'user_text': str, 'asr_labels': list}}
@@ -325,28 +325,42 @@ class ETLService:
         if not call_ids:
             return {}
 
-        # 获取表名
-        table_name = get_call_record_detail_table(target_date)
+        # 提取所有日期,确定涉及的月份范围
+        dates = [call_date for _, call_date in call_ids]
+        min_date = min(dates)
+        max_date = max(dates)
+
+        # 获取涉及的所有分表
+        tables = get_tables_for_period(min_date, max_date, "call_record_detail")
+        logger.info(f"跨月查询涉及 {len(tables)} 张表: {tables}")
 
         # 提取所有 callid
         callid_list = [c[0] for c in call_ids]
 
-        # 批量查询 ASR 详情
-        # 使用 IN 查询一次获取所有数据
+        # 构建参数占位符
         placeholders = ", ".join([f":callid_{i}" for i in range(len(callid_list))])
+        params = {f"callid_{i}": callid for i, callid in enumerate(callid_list)}
+
+        # 为每个表构建子查询
+        subqueries = []
+        for table in tables:
+            subqueries.append(f"""
+                SELECT 
+                    callid,
+                    sequence,
+                    question,
+                    answer_text
+                FROM {table}
+                WHERE callid IN ({placeholders})
+                  AND notify = 'asrmessage_notify'
+            """)
+
+        # UNION ALL 合并所有子查询
+        union_sql = " UNION ALL ".join(subqueries)
         sql = text(f"""
-            SELECT 
-                callid,
-                sequence,
-                question,
-                answer_text
-            FROM {table_name}
-            WHERE callid IN ({placeholders})
-              AND notify = 'asrmessage_notify'
+            SELECT * FROM ({union_sql}) AS combined
             ORDER BY callid, sequence ASC
         """)
-
-        params = {f"callid_{i}": callid for i, callid in enumerate(callid_list)}
 
         result_map = {}
         async for session in get_source_db():
@@ -388,7 +402,7 @@ class ETLService:
                     }
 
             except Exception as e:
-                logger.error(f"批量获取 ASR 详情失败: {e}")
+                logger.error(f"批量获取 ASR 详情失败 (涉及表: {tables}): {e}")
 
         return result_map
 

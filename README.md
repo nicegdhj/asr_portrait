@@ -1,6 +1,11 @@
 # 智能外呼用户画像系统
 
-> 基于智能外呼通话数据的客户画像分析平台，支持满意度、情感、风险、沟通意愿四维度画像分析
+> 基于智能外呼通话数据的客户画像分析平台,支持满意度、情感、风险、沟通意愿四维度画像分析
+
+[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
+[![Vue](https://img.shields.io/badge/Vue-3.0+-brightgreen.svg)](https://vuejs.org/)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## 目录
 
@@ -368,6 +373,7 @@ else:                        → 无风险 (none)
 | neutral | 哦、嗯、知道了、好吧、行吧 |
 
 **判定规则**:
+
 ```python
 if negative_count > 0:   → negative  # 负面优先
 elif positive_count > 0: → positive
@@ -534,6 +540,7 @@ class PortraitService:
 | 画像计算 | 06:00 | 计算周/月/季度快照和汇总 |
 
 配置方式:
+
 ```env
 SCHEDULER_ENABLED=true
 SYNC_CRON_HOUR=2
@@ -652,68 +659,238 @@ async function loadCustomers() {
 
 ## 部署与启动
 
-### 环境要求
+### 📋 环境要求
 
-- Python 3.11+
-- Node.js 18+
-- Docker & Docker Compose
+- **Python**: 3.11+
+- **Node.js**: 18+
+- **Docker**: 用于运行PostgreSQL数据库
+- **uv**: Python包管理器 (推荐) 或 pip
 
-### 快速启动
+### 🚀 快速启动 (本地开发)
+
+#### 1. 克隆项目
 
 ```bash
-# 1. 启动数据库
-docker-compose up -d portrait-postgres source-mysql
+git clone https://github.com/your-username/portrait.git
+cd portrait
+```
 
-# 2. 启动后端
-cd /path/to/project
+#### 2. 安装依赖
+
+**后端依赖**:
+
+```bash
+# 使用 uv (推荐)
+uv sync
+
+# 或使用 pip
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn src.main:app --host 0.0.0.0 --port 8000
+```
 
-# 3. 启动前端
+**前端依赖**:
+
+```bash
 cd web
 npm install
+cd ..
+```
+
+#### 3. 配置环境变量
+
+```bash
+# 复制环境变量模板
+cp .env.example .env
+
+# 编辑 .env 文件 (可选,默认配置即可运行)
+# 如果只是体验系统,无需修改
+```
+
+#### 4. 启动数据库
+
+```bash
+# 启动 PostgreSQL (使用 Docker)
+docker compose -f docker/docker-compose.yml up -d postgres
+```
+
+#### 5. 初始化数据库
+
+```bash
+# 创建数据库表
+uv run python scripts/init_db.py
+
+# 或使用 Alembic 迁移
+uv run alembic upgrade head
+```
+
+#### 6. 启动服务
+
+**方式1: 一键启动 (推荐)**
+
+```bash
+sh scripts/start_all.sh
+```
+
+**方式2: 分别启动**
+
+```bash
+# 终端1: 启动后端
+uv run uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+
+# 终端2: 启动前端
+cd web
 npm run dev
 ```
 
-### 一键启动脚本
+#### 7. 访问系统
+
+- **前端**: <http://localhost:3001>
+- **后端API文档**: <http://localhost:8000/docs>
+- **健康检查**: <http://localhost:8000/health>
+
+### 📊 加载示例数据 (可选)
+
+如果你想体验完整功能,可以加载示例数据:
 
 ```bash
-# 启动所有服务
-sh scripts/start_all.sh
+# 加载示例数据到数据库
+uv run python scripts/load_demo_data.py
+```
 
+### 🛑 停止服务
+
+```bash
 # 停止所有服务
 sh scripts/stop_all.sh
+
+# 停止并清理 Docker
+sh scripts/stop_all.sh --all
 ```
 
-### 数据重建
+### 📝 查看日志
 
 ```bash
-# 清空画像数据并重新计算
-PYTHONPATH=. python scripts/rebuild_data.py
+# 后端日志
+tail -f logs/portrait.log
+
+# 错误日志
+tail -f logs/error.log
+
+# 前端日志
+tail -f /tmp/vite-dev.log
 ```
 
-### 环境变量配置
+### ⚙️ 环境变量说明
+
+#### 必需配置
+
+如果你有自己的MySQL数据源,需要配置:
 
 ```env
-# PostgreSQL (画像存储)
-PORTRAIT_DB_HOST=localhost
-PORTRAIT_DB_PORT=5432
-PORTRAIT_DB_USER=portrait
-PORTRAIT_DB_PASSWORD=portrait123
-PORTRAIT_DB_NAME=portrait
-
-# MySQL (源数据，只读)
-SOURCE_DB_HOST=localhost
-SOURCE_DB_PORT=3306
-SOURCE_DB_USER=readonly
-SOURCE_DB_PASSWORD=xxx
-SOURCE_DB_NAME=outbound_saas
-
-# 调度器
-SCHEDULER_ENABLED=true
+# MySQL 源数据库 (外呼系统数据)
+MYSQL_HOST=your_mysql_host
+MYSQL_PORT=3306
+MYSQL_USER=readonly_user
+MYSQL_PASSWORD=your_password
+MYSQL_DB=outbound_saas
 ```
+
+#### 可选配置
+
+```env
+# PostgreSQL (默认即可)
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_USER=portrait
+POSTGRES_PASSWORD=portrait123
+POSTGRES_DB=portrait
+
+# 日志级别
+LOG_LEVEL=INFO  # DEBUG, INFO, WARNING, ERROR
+
+# 调试模式
+DEBUG=true  # 开发环境: true, 生产环境: false
+```
+
+### 🐳 Docker 部署 (生产环境)
+
+#### 1. 准备环境变量
+
+```bash
+cp env.production.example .env
+# 编辑 .env 配置生产环境参数
+```
+
+#### 2. 启动服务
+
+```bash
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+#### 3. 查看日志
+
+```bash
+# 查看所有服务日志
+docker-compose -f docker-compose.prod.yml logs -f
+
+# 查看后端日志
+docker-compose -f docker-compose.prod.yml logs -f portrait-api
+
+# 查看文件日志
+tail -f logs/portrait.log
+```
+
+### 🔧 常见问题
+
+#### Q: 启动失败,提示端口被占用?
+
+```bash
+# 检查端口占用
+lsof -i :8000  # 后端端口
+lsof -i :3001  # 前端端口
+lsof -i :5432  # PostgreSQL端口
+
+# 修改端口 (在 .env 中)
+API_PORT=8001
+WEB_PORT=3002
+```
+
+#### Q: PostgreSQL 连接失败?
+
+```bash
+# 检查 Docker 容器状态
+docker ps | grep postgres
+
+# 重启 PostgreSQL
+docker compose -f docker/docker-compose.yml restart postgres
+
+# 查看日志
+docker compose -f docker/docker-compose.yml logs postgres
+```
+
+#### Q: 前端无法连接后端?
+
+检查前端配置文件 `web/.env`:
+
+```env
+VITE_API_BASE_URL=http://localhost:8000
+```
+
+#### Q: 没有MySQL数据源,能运行吗?
+
+可以! 系统会自动跳过MySQL连接,你可以:
+
+1. 使用示例数据体验功能
+2. 手动导入测试数据
+3. 仅使用PostgreSQL存储的画像数据
+
+### 💡 提示
+
+- **首次启动**: 数据库初始化可能需要几秒钟
+- **开发模式**: 代码修改后会自动重载 (热更新)
+- **日志查看**: 开发环境日志会同时输出到控制台和文件
+- **数据持久化**: 数据库数据存储在 Docker volume 中,停止容器不会丢失
 
 ---
 

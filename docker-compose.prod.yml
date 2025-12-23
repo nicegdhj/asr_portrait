@@ -23,7 +23,7 @@ services:
     networks:
       - portrait-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      test: [ "CMD", "curl", "-f", "http://localhost:80" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -57,6 +57,8 @@ services:
       # 调度器配置 (可选)
       - SCHEDULER_ENABLED=${SCHEDULER_ENABLED:-false}
       - SYNC_CRON_HOUR=${SYNC_CRON_HOUR:-2}
+    volumes:
+      - ./logs:/app/logs # 日志目录挂载
     depends_on:
       portrait-postgres:
         condition: service_healthy
@@ -64,7 +66,7 @@ services:
     networks:
       - portrait-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -88,7 +90,7 @@ services:
       - portrait-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-portrait} -d ${POSTGRES_DB:-portrait}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-portrait} -d ${POSTGRES_DB:-portrait}" ]
       interval: 10s
       timeout: 5s
       retries: 5
