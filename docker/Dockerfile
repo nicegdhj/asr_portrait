@@ -1,61 +1,63 @@
 # Portrait 用户数据画像服务 Dockerfile
-# 多阶段构建，减小镜像体积
+# 多阶段构建,减小镜像体积,支持跨平台构建
 
 # ===========================================
 # 构建阶段
 # ===========================================
-FROM python:3.11-slim as builder
+FROM --platform=linux/amd64 python:3.11-slim as builder
 
 WORKDIR /app
 
-# 安装构建依赖
+# 安装构建依赖(合并 RUN 减少层数)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# 安装 uv
-RUN pip install --no-cache-dir uv
+    && pip install --no-cache-dir uv \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # 复制依赖文件
-COPY pyproject.toml ./
+COPY pyproject.toml README.md ./
 
 # 创建虚拟环境并安装依赖
-RUN uv venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-RUN uv pip install --no-cache .
+RUN uv venv /opt/venv && \
+    . /opt/venv/bin/activate && \
+    uv pip install --no-cache .
 
 # ===========================================
 # 运行阶段
 # ===========================================
-FROM python:3.11-slim as runtime
+FROM --platform=linux/amd64 python:3.11-slim as runtime
 
 WORKDIR /app
 
-# 安装运行时依赖
+# 安装运行时依赖(合并 RUN 减少层数)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # 从构建阶段复制虚拟环境
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# 复制源代码
+# 复制源代码(只复制必要的文件)
 COPY src/ ./src/
 COPY migrations/ ./migrations/
 COPY alembic.ini ./
 
 # 环境变量
-ENV PYTHONPATH=/app
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV APP_ENV=production
+ENV PYTHONPATH=/app \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    APP_ENV=production
 
 # 创建非 root 用户
-RUN groupadd -r portrait && useradd -r -g portrait portrait
-RUN chown -R portrait:portrait /app
+RUN groupadd -r portrait && \
+    useradd -r -g portrait portrait && \
+    chown -R portrait:portrait /app
+
 USER portrait
 
 # 暴露端口

@@ -768,6 +768,239 @@ sh scripts/stop_all.sh
 sh scripts/stop_all.sh --all
 ```
 
+---
+
+## 🚀 生产环境部署
+
+### 📦 离线部署方案 (推荐)
+
+> [!IMPORTANT]
+> **适用场景**: 云端服务器位于私域网络,无法访问外网拉取 Docker 镜像和依赖包
+
+#### 部署架构
+
+```
+本地开发机 (M1 Mac)          云端服务器 (Ubuntu)
+     │                              │
+     ├─ 1. 构建并打包镜像           │
+     ├─ 2. 传输 ──────────────────→ │
+     │                              ├─ 3. 导入并部署
+     │                              └─ 4. 访问系统
+```
+
+#### 步骤 1: 本地构建并打包 (M1 Mac)
+
+```bash
+# 在本地开发机执行
+cd /path/to/portrait
+
+# 一键构建并打包所有镜像
+./scripts/build_and_export.sh
+```
+
+**脚本功能**:
+
+- ✅ 自动检查 Docker Buildx 环境
+- ✅ 创建跨平台构建器
+- ✅ 构建后端 API 镜像 (portrait-api:latest)
+- ✅ 构建前端 Web 镜像 (portrait-web:latest)
+- ✅ 拉取 PostgreSQL 镜像 (postgres:15-alpine)
+- ✅ 验证镜像平台架构为 linux/amd64
+- ✅ 导出所有镜像为 tar 文件
+
+**输出文件**: `files/portrait-images.tar` (约 500MB)
+
+**预计耗时**: 5-10 分钟(首次构建)
+
+#### 步骤 2: 传输到云端服务器
+
+选择以下任一方式传输镜像文件:
+
+**方式 1: scp 命令**
+
+```bash
+scp files/portrait-images.tar user@your-server:/path/to/destination/
+```
+
+**方式 2: rsync 命令 (支持断点续传)**
+
+```bash
+rsync -avP files/portrait-images.tar user@your-server:/path/to/destination/
+```
+
+**方式 3: 物理传输**
+
+- 使用 U盘/移动硬盘复制文件到云端服务器
+
+#### 步骤 3: 云端部署
+
+```bash
+# 在云端服务器执行
+cd /path/to/portrait
+
+# 一键导入镜像并启动服务
+./scripts/deploy_remote.sh portrait-images.tar
+```
+
+**脚本功能**:
+
+- ✅ 导入所有 Docker 镜像
+- ✅ 验证镜像完整性
+- ✅ 检查环境变量配置
+- ✅ 启动 Docker Compose 服务
+- ✅ 执行健康检查
+- ✅ 显示访问地址
+
+#### 步骤 4: 配置环境变量
+
+首次部署时,脚本会自动创建 `.env` 文件,需要编辑配置:
+
+```bash
+vim .env
+```
+
+**必需配置**:
+
+```env
+# MySQL 源数据库(连接线上外呼系统)
+MYSQL_HOST=your_mysql_host
+MYSQL_PORT=3306
+MYSQL_USER=readonly_user
+MYSQL_PASSWORD=your_password
+MYSQL_DB=outbound_saas
+
+# PostgreSQL 画像数据库
+POSTGRES_USER=portrait
+POSTGRES_PASSWORD=your_secure_password
+POSTGRES_DB=portrait
+```
+
+配置完成后,重新运行部署脚本:
+
+```bash
+./scripts/deploy_remote.sh portrait-images.tar
+```
+
+#### 步骤 5: 初始化数据库
+
+```bash
+# 运行数据库迁移
+docker-compose -f docker-compose.prod.yml exec portrait-api alembic upgrade head
+```
+
+#### 步骤 6: 访问系统
+
+```
+前端地址: http://your-server-ip:80
+后端 API: http://your-server-ip:8000
+API 文档: http://your-server-ip:8000/docs
+```
+
+---
+
+### 🔄 更新部署
+
+当代码更新后,重新部署:
+
+```bash
+# 本地: 重新构建并打包
+./scripts/build_and_export.sh
+
+# 传输到云端后
+# 云端: 停止服务、重新部署
+docker-compose -f docker-compose.prod.yml down
+./scripts/deploy_remote.sh portrait-images.tar
+```
+
+---
+
+### 🛠️ 运维命令
+
+```bash
+# 查看服务状态
+docker-compose -f docker-compose.prod.yml ps
+
+# 查看日志
+docker-compose -f docker-compose.prod.yml logs -f
+
+# 查看特定服务日志
+docker-compose -f docker-compose.prod.yml logs -f portrait-api
+
+# 重启服务
+docker-compose -f docker-compose.prod.yml restart
+
+# 停止服务
+docker-compose -f docker-compose.prod.yml down
+
+# 停止并删除数据卷(危险操作)
+docker-compose -f docker-compose.prod.yml down -v
+```
+
+---
+
+### 🐛 故障排查
+
+#### 问题 1: 镜像构建失败
+
+**错误**: `ERROR: failed to solve: failed to compute cache key`
+
+**解决方案**:
+
+```bash
+# 清理 Docker 构建缓存
+docker builder prune -af
+
+# 重新构建
+./scripts/build_offline_images.sh
+```
+
+#### 问题 2: 跨平台构建器创建失败
+
+**错误**: `ERROR: Multiple platforms feature is currently not supported`
+
+**解决方案**:
+
+```bash
+# 确保 Docker Desktop 已启用 "Use containerd for pulling and storing images"
+# 设置 -> Docker Engine -> 启用 containerd
+
+# 或手动创建构建器
+docker buildx create --name multiarch --driver docker-container --use
+docker buildx inspect --bootstrap
+```
+
+#### 问题 3: 服务启动后无法访问
+
+**检查步骤**:
+
+```bash
+# 1. 检查容器状态
+docker-compose -f docker-compose.prod.yml ps
+
+# 2. 检查健康状态
+docker inspect portrait-api | grep -A 10 Health
+
+# 3. 查看日志
+docker-compose -f docker-compose.prod.yml logs portrait-api
+
+# 4. 检查端口占用
+netstat -tuln | grep -E '80|8000|5432'
+```
+
+#### 问题 4: 数据库连接失败
+
+**检查配置**:
+
+```bash
+# 查看环境变量
+docker-compose -f docker-compose.prod.yml exec portrait-api env | grep DB
+
+# 测试数据库连接
+docker exec portrait-postgres pg_isready -U portrait
+```
+
+---
+
 ### 📝 查看日志
 
 ```bash

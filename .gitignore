@@ -21,6 +21,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+files/
 
 # ===========================================
 # 虚拟环境
@@ -79,6 +80,7 @@ logs/
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
 
 # ===========================================
 # 临时文件
