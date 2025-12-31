@@ -87,7 +87,7 @@ echo ""
 
 # 拉取 PostgreSQL 镜像并导出
 info "3/3 拉取并导出 PostgreSQL 镜像..."
-docker pull postgres:15-alpine
+docker pull --platform linux/amd64 postgres:15-alpine
 docker save -o "${TEMP_DIR}/postgres.tar" postgres:15-alpine || error "PostgreSQL 镜像导出失败"
 success "PostgreSQL 镜像导出完成"
 echo ""
