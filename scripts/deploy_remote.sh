@@ -176,6 +176,16 @@ sleep 10
 
 $COMPOSE_CMD -f docker-compose.prod.yml ps
 
+# 初始化数据库表结构
+echo ""
+info "初始化数据库表结构..."
+$COMPOSE_CMD -f docker-compose.prod.yml exec -T portrait-api alembic upgrade head || {
+    warn "数据库迁移失败，可能需要手动执行:"
+    warn "  $COMPOSE_CMD -f docker-compose.prod.yml exec portrait-api alembic upgrade head"
+}
+success "数据库表结构初始化完成"
+echo ""
+
 # 健康检查
 info "健康检查..."
 echo ""
@@ -214,9 +224,9 @@ echo "  API 文档: http://${SERVER_IP}:8000/docs"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-info "初始化数据库: $COMPOSE_CMD -f docker-compose.prod.yml exec portrait-api alembic upgrade head"
 info "查看日志: $COMPOSE_CMD -f docker-compose.prod.yml logs -f"
 info "停止服务: $COMPOSE_CMD -f docker-compose.prod.yml down"
+info "重新初始化数据库: $COMPOSE_CMD -f docker-compose.prod.yml exec portrait-api alembic upgrade head"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 success "部署完成!"
