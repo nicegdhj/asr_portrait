@@ -56,17 +56,17 @@ services:
       - APP_ENV=production
       - DEBUG=false
       # PostgreSQL 画像数据库
-      - PORTRAIT_DB_HOST=portrait-postgres
-      - PORTRAIT_DB_PORT=5432
-      - PORTRAIT_DB_USER=${POSTGRES_USER:-portrait}
-      - PORTRAIT_DB_PASSWORD=${POSTGRES_PASSWORD:-portrait123}
-      - PORTRAIT_DB_NAME=${POSTGRES_DB:-portrait}
+      - POSTGRES_HOST=portrait-postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-portrait}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-portrait123}
+      - POSTGRES_DB=${POSTGRES_DB:-portrait}
       # MySQL 源数据库 (连接线上外呼系统)
-      - SOURCE_DB_HOST=${MYSQL_HOST}
-      - SOURCE_DB_PORT=${MYSQL_PORT:-3306}
-      - SOURCE_DB_USER=${MYSQL_USER}
-      - SOURCE_DB_PASSWORD=${MYSQL_PASSWORD}
-      - SOURCE_DB_NAME=${MYSQL_DB:-outbound_saas}
+      - MYSQL_HOST=${MYSQL_HOST}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DB=${MYSQL_DB:-outbound_saas}
       # 调度器配置 (可选)
       - SCHEDULER_ENABLED=${SCHEDULER_ENABLED:-false}
       - SYNC_CRON_HOUR=${SYNC_CRON_HOUR:-2}
@@ -138,8 +138,3 @@ volumes:
 networks:
   portrait-network:
     driver: bridge
-
-
-
-
-

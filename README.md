@@ -770,12 +770,11 @@ sh scripts/stop_all.sh --all
 
 ---
 
-## 🚀 生产环境部署
-
-### 📦 离线部署方案 (推荐)
-
+## 🚀 生产环境部署 
 > [!IMPORTANT]
-> **适用场景**: 云端服务器位于私域网络,无法访问外网拉取 Docker 镜像和依赖包
+> **离线部署**: 云端服务器位于私域网络,无法访问外网拉取 Docker 镜像和依赖包
+
+
 
 #### 部署架构
 
@@ -788,7 +787,7 @@ sh scripts/stop_all.sh --all
      │                              └─ 4. 访问系统
 ```
 
-#### 步骤 1: 本地构建并打包 (M1 Mac)
+#### 步骤 1: 本地构建并打包
 
 ```bash
 # 在本地开发机执行
@@ -819,41 +818,69 @@ cd /path/to/portrait
 **方式 1: scp 命令**
 
 ```bash
-scp files/portrait-images.tar user@your-server:/path/to/destination/
+# 注意：实际文件名带有时间戳，如 portrait-images_20260106_152730.tar.gz
+scp files/portrait-images_*.tar.gz user@your-server:/home/user/
 ```
 
-**方式 2: rsync 命令 (支持断点续传)**
+**方式 2: rsync 命令 (支持断点续传，推荐大文件)**
 
 ```bash
-rsync -avP files/portrait-images.tar user@your-server:/path/to/destination/
+rsync -avP files/portrait-images_*.tar.gz user@your-server:/home/user/
 ```
 
 **方式 3: 物理传输**
 
 - 使用 U盘/移动硬盘复制文件到云端服务器
 
-#### 步骤 3: 云端部署
+#### 步骤 3: 远端服务器准备
+
+> [!NOTE]
+> 打包文件 `portrait-images_*.tar.gz` 已包含所有必需文件（镜像、配置、脚本），无需额外克隆代码
+
+**SSH 登录到远端服务器后执行：**
 
 ```bash
-# 在云端服务器执行
-cd /path/to/portrait
+# 创建项目目录
+mkdir -p /home/user/portrait
+cd /home/user/portrait
 
-# 一键导入镜像并启动服务
-./scripts/deploy_remote.sh portrait-images.tar
+# 将打包文件移动到项目目录（如果不在此目录）
+mv ~/portrait-images_*.tar.gz .
 ```
 
-**脚本功能**:
+#### 步骤 4: 解压并部署
 
-- ✅ 导入所有 Docker 镜像
-- ✅ 验证镜像完整性
-- ✅ 检查环境变量配置
+```bash
+# 解压打包文件
+tar -xzf portrait-images_*.tar.gz
+
+# 赋予脚本执行权限
+chmod +x scripts/*.sh
+
+# 一键导入镜像并启动服务
+./scripts/deploy_remote.sh portrait-images_*.tar.gz
+```
+
+**打包文件包含：**
+
+- ✅ Docker 镜像（portrait-api、portrait-web、postgres）
+- ✅ `docker-compose.prod.yml`（编排配置）
+- ✅ `.env`（环境变量）
+- ✅ `scripts/deploy_remote.sh`（部署脚本）
+- ✅ `scripts/check_access.sh`（访问检测脚本）
+
+**部署脚本功能**:
+
+- ✅ 解压并导入所有 Docker 镜像
+- ✅ 验证镜像完整性和架构
+- ✅ 复制环境变量配置文件
 - ✅ 启动 Docker Compose 服务
 - ✅ 执行健康检查
 - ✅ 显示访问地址
 
-#### 步骤 4: 配置环境变量
+#### 步骤 5: 配置环境变量
 
-首次部署时,脚本会自动创建 `.env` 文件,需要编辑配置:
+首次部署时,脚本会自动从打包文件中提取 `.env` 文件。如需修改配置:
 
 ```bash
 vim .env
@@ -875,26 +902,84 @@ POSTGRES_PASSWORD=your_secure_password
 POSTGRES_DB=portrait
 ```
 
-配置完成后,重新运行部署脚本:
+配置完成后,重启服务:
 
 ```bash
-./scripts/deploy_remote.sh portrait-images.tar
+docker compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml up -d
 ```
 
-#### 步骤 5: 初始化数据库
+#### 步骤 6: 初始化数据库
 
 ```bash
 # 运行数据库迁移
-docker-compose -f docker-compose.prod.yml exec portrait-api alembic upgrade head
+docker compose -f docker-compose.prod.yml exec portrait-api alembic upgrade head
+
+# 或使用初始化脚本（如果 alembic 失败）
+docker compose -f docker-compose.prod.yml exec portrait-api python scripts/init_db.py
 ```
 
-#### 步骤 6: 访问系统
+#### 步骤 7: 验证部署并获取访问地址
+
+```bash
+# 运行访问检测脚本
+./scripts/check_access.sh
+```
+
+**检测脚本会自动：**
+
+- ✅ 获取服务器内网 IP 和公网 IP
+- ✅ 检测 Docker 容器运行状态
+- ✅ 检测端口监听状态（80/8000/5432）
+- ✅ 执行服务健康检查
+- ✅ 检测防火墙配置
+- ✅ 生成访问地址
+
+**访问地址示例：**
 
 ```
-前端地址: http://your-server-ip:80
-后端 API: http://your-server-ip:8000
-API 文档: http://your-server-ip:8000/docs
+┌──────────────────────────────────────────────────────────┐
+│  前端访问地址                                            │
+├──────────────────────────────────────────────────────────┤
+│  局域网: http://192.168.1.100                            │
+│  公网:   http://123.45.67.89                             │
+│  本机:   http://localhost                                │
+├──────────────────────────────────────────────────────────┤
+│  API 文档                                                │
+├──────────────────────────────────────────────────────────┤
+│  局域网: http://192.168.1.100:8000/docs                  │
+│  公网:   http://123.45.67.89:8000/docs                   │
+│  本机:   http://localhost:8000/docs                      │
+└──────────────────────────────────────────────────────────┘
 ```
+
+#### 步骤 8: 配置防火墙（如无法访问）
+
+如果检测脚本提示防火墙端口未开放，需要执行：
+
+**Ubuntu/Debian (UFW):**
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 8000/tcp
+sudo ufw status
+```
+
+**CentOS/RHEL (firewalld):**
+
+```bash
+sudo firewall-cmd --permanent --add-port=80/tcp
+sudo firewall-cmd --permanent --add-port=8000/tcp
+sudo firewall-cmd --reload
+sudo firewall-cmd --list-ports
+```
+
+**云服务器安全组:**
+
+如果使用阿里云/腾讯云等云服务器，还需要在云控制台的**安全组**中添加入站规则：
+
+- TCP 80（前端）
+- TCP 8000（后端 API）
 
 ---
 
@@ -938,9 +1023,124 @@ docker-compose -f docker-compose.prod.yml down -v
 
 ---
 
-### 🐛 故障排查
+### 🐛 常见问题排查
 
-#### 问题 1: 镜像构建失败
+#### 问题 1: 容器启动失败 - 日志权限错误
+
+**错误信息**:
+
+```
+PermissionError: [Errno 13] Permission denied: '/app/logs/portrait.log'
+```
+
+**原因**: 宿主机的 `logs` 目录不存在或权限不足。
+
+**解决方案**:
+
+```bash
+# 停止服务
+docker compose -f docker-compose.prod.yml down
+
+# 创建日志目录并设置权限
+mkdir -p logs
+chmod 777 logs
+
+# 重新启动
+docker compose -f docker-compose.prod.yml up -d
+```
+
+**永久解决**: 重新构建镜像（已在 Dockerfile 中修复）。
+
+---
+
+#### 问题 2: PostgreSQL 连接被拒绝
+
+**错误信息**:
+
+```
+ConnectionRefusedError: [Errno 111] Connection refused
+```
+
+**原因**: 环境变量配置错误，应用使用了 `localhost` 而不是容器名称。
+
+**检查配置**:
+
+```bash
+# 1. 查看 .env 文件
+cat .env | grep POSTGRES_HOST
+
+# 应该是: POSTGRES_HOST=portrait-postgres
+# 而不是: POSTGRES_HOST=localhost
+```
+
+**解决方案**:
+
+确保 `.env` 文件中的配置正确：
+
+```env
+# PostgreSQL (Docker 环境必须使用容器名称)
+POSTGRES_HOST=portrait-postgres  # 重要！
+POSTGRES_PORT=5432
+POSTGRES_USER=portrait
+POSTGRES_PASSWORD=portrait123
+POSTGRES_DB=portrait
+```
+
+重启服务：
+
+```bash
+docker compose -f docker-compose.prod.yml down
+docker compose -f docker-compose.prod.yml up -d
+```
+
+---
+
+#### 问题 3: 容器健康检查失败
+
+**症状**: `docker compose ps` 显示 `unhealthy` 或不断重启。
+
+**诊断步骤**:
+
+```bash
+# 1. 查看容器状态
+docker compose -f docker-compose.prod.yml ps
+
+# 2. 查看详细日志
+docker compose -f docker-compose.prod.yml logs --tail=100 portrait-api
+
+# 3. 检查健康检查状态
+docker inspect portrait-api --format='{{.State.Health.Status}}'
+
+# 4. 查看健康检查日志
+docker inspect portrait-api --format='{{range .State.Health.Log}}{{.Output}}{{end}}'
+```
+
+**常见原因**:
+
+- 数据库连接失败（见问题 2）
+- 日志目录权限问题（见问题 1）
+- 端口被占用
+
+---
+
+#### 问题 4: MySQL 连接失败（可忽略）
+
+**说明**: MySQL 是可选的，仅用于数据同步。如果没有 MySQL，系统仍可正常启动。
+
+**临时配置** (如果没有 MySQL):
+
+```env
+# 使用占位符，不影响启动
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_USER=test
+MYSQL_PASSWORD=test
+MYSQL_DB=test
+```
+
+---
+
+#### 问题 5: 镜像构建失败
 
 **错误**: `ERROR: failed to solve: failed to compute cache key`
 
@@ -951,17 +1151,19 @@ docker-compose -f docker-compose.prod.yml down -v
 docker builder prune -af
 
 # 重新构建
-./scripts/build_offline_images.sh
+./scripts/build_and_export.sh
 ```
 
-#### 问题 2: 跨平台构建器创建失败
+---
+
+#### 问题 6: 跨平台构建器创建失败
 
 **错误**: `ERROR: Multiple platforms feature is currently not supported`
 
 **解决方案**:
 
 ```bash
-# 确保 Docker Desktop 已启用 "Use containerd for pulling and storing images"
+# 确保 Docker Desktop 已启用 containerd
 # 设置 -> Docker Engine -> 启用 containerd
 
 # 或手动创建构建器
@@ -969,50 +1171,61 @@ docker buildx create --name multiarch --driver docker-container --use
 docker buildx inspect --bootstrap
 ```
 
-#### 问题 3: 服务启动后无法访问
+---
 
-**检查步骤**:
+#### 问题 7: 服务启动后无法从外部访问
+
+**检查清单**:
 
 ```bash
-# 1. 检查容器状态
-docker-compose -f docker-compose.prod.yml ps
+# 1. 检查容器是否正常运行
+docker compose -f docker-compose.prod.yml ps
 
-# 2. 检查健康状态
-docker inspect portrait-api | grep -A 10 Health
+# 2. 检查端口监听
+ss -tlnp | grep -E ':(80|8000)'
 
-# 3. 查看日志
-docker-compose -f docker-compose.prod.yml logs portrait-api
+# 3. 测试本地访问
+curl http://localhost:8000/health
 
-# 4. 检查端口占用
-netstat -tuln | grep -E '80|8000|5432'
+# 4. 检查防火墙
+sudo ufw status  # Ubuntu
+sudo firewall-cmd --list-ports  # CentOS
 ```
 
-#### 问题 4: 数据库连接失败
+**解决方案**: 参见步骤 8 的防火墙配置。
 
-**检查配置**:
+---
+
+### 🔧 诊断工具
+
+使用诊断脚本快速排查问题：
 
 ```bash
-# 查看环境变量
-docker-compose -f docker-compose.prod.yml exec portrait-api env | grep DB
+# 运行诊断脚本（需要重新打包才有）
+./scripts/diagnose_deployment.sh
+```
 
-# 测试数据库连接
+或手动诊断：
+
+```bash
+# 完整诊断命令
+echo "=== 容器状态 ==="
+docker compose -f docker-compose.prod.yml ps
+
+echo "=== API 日志 ==="
+docker compose -f docker-compose.prod.yml logs --tail=50 portrait-api
+
+echo "=== 环境变量 ==="
+cat .env | grep -E "POSTGRES_|MYSQL_"
+
+echo "=== 健康检查 ==="
+curl http://localhost:8000/health
+
+echo "=== 数据库连接 ==="
 docker exec portrait-postgres pg_isready -U portrait
 ```
 
 ---
-
-### 📝 查看日志
-
-```bash
-# 后端日志
-tail -f logs/portrait.log
-
-# 错误日志
-tail -f logs/error.log
-
-# 前端日志
-tail -f /tmp/vite-dev.log
-```
 
 ### ⚙️ 环境变量说明
 
@@ -1046,77 +1259,6 @@ LOG_LEVEL=INFO  # DEBUG, INFO, WARNING, ERROR
 DEBUG=true  # 开发环境: true, 生产环境: false
 ```
 
-### 🐳 Docker 部署 (生产环境)
-
-#### 1. 准备环境变量
-
-```bash
-cp env.production.example .env
-# 编辑 .env 配置生产环境参数
-```
-
-#### 2. 启动服务
-
-```bash
-docker-compose -f docker-compose.prod.yml up -d
-```
-
-#### 3. 查看日志
-
-```bash
-# 查看所有服务日志
-docker-compose -f docker-compose.prod.yml logs -f
-
-# 查看后端日志
-docker-compose -f docker-compose.prod.yml logs -f portrait-api
-
-# 查看文件日志
-tail -f logs/portrait.log
-```
-
-### 🔧 常见问题
-
-#### Q: 启动失败,提示端口被占用?
-
-```bash
-# 检查端口占用
-lsof -i :8000  # 后端端口
-lsof -i :3001  # 前端端口
-lsof -i :5432  # PostgreSQL端口
-
-# 修改端口 (在 .env 中)
-API_PORT=8001
-WEB_PORT=3002
-```
-
-#### Q: PostgreSQL 连接失败?
-
-```bash
-# 检查 Docker 容器状态
-docker ps | grep postgres
-
-# 重启 PostgreSQL
-docker compose -f docker/docker-compose.yml restart postgres
-
-# 查看日志
-docker compose -f docker/docker-compose.yml logs postgres
-```
-
-#### Q: 前端无法连接后端?
-
-检查前端配置文件 `web/.env`:
-
-```env
-VITE_API_BASE_URL=http://localhost:8000
-```
-
-#### Q: 没有MySQL数据源,能运行吗?
-
-可以! 系统会自动跳过MySQL连接,你可以:
-
-1. 使用示例数据体验功能
-2. 手动导入测试数据
-3. 仅使用PostgreSQL存储的画像数据
 
 ### 💡 提示
 
@@ -1151,12 +1293,6 @@ VITE_API_BASE_URL=http://localhost:8000
 5. **更新前端**
    - `types/index.ts`: 更新类型定义
    - `PortraitDashboard.vue`: 添加展示组件
-
-### 代码规范
-
-- 后端: PEP 8 + Black 格式化
-- 前端: ESLint + Prettier
-- 提交信息: Conventional Commits
 
 ### 测试
 

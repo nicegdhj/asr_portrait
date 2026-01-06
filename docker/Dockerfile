@@ -53,9 +53,10 @@ ENV PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
     APP_ENV=production
 
-# 创建非 root 用户
+# 创建非 root 用户和日志目录
 RUN groupadd -r portrait && \
     useradd -r -g portrait portrait && \
+    mkdir -p /app/logs && \
     chown -R portrait:portrait /app
 
 USER portrait

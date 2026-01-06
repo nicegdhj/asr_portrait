@@ -137,6 +137,13 @@ fi
 info "复制 docker-compose.prod.yml..."
 cp docker-compose.prod.yml "$OUTPUT_DIR/"
 
+# 复制部署脚本
+info "复制部署脚本..."
+mkdir -p "$OUTPUT_DIR/scripts"
+cp scripts/deploy_remote.sh "$OUTPUT_DIR/scripts/"
+cp scripts/check_access.sh "$OUTPUT_DIR/scripts/"
+chmod +x "$OUTPUT_DIR/scripts/"*.sh
+
 # 打包所有文件
 info "打包镜像和配置文件..."
 cd "$OUTPUT_DIR"
@@ -145,8 +152,9 @@ cd "$OUTPUT_DIR"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 OUTPUT_FILENAME="portrait-images_${TIMESTAMP}.tar.gz"
 
-tar -czf "$OUTPUT_FILENAME" images.tar docker-compose.prod.yml .env 2>/dev/null || \
-    tar -czf "$OUTPUT_FILENAME" images.tar docker-compose.prod.yml
+# 打包时包含脚本目录
+tar -czf "$OUTPUT_FILENAME" images.tar docker-compose.prod.yml scripts/ .env 2>/dev/null || \
+    tar -czf "$OUTPUT_FILENAME" images.tar docker-compose.prod.yml scripts/
 cd "$PROJECT_DIR"
 
 # 清理临时文件
