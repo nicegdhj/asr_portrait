@@ -111,12 +111,8 @@ fi
 # 复制配置文件
 if [ -f "$TEMP_DIR/.env" ]; then
     if [ -f ".env" ]; then
-        warn ".env 文件已存在,备份为 .env.backup"
-        cp .env .env.backup
+        success "环境变量配置已就绪"
     fi
-    info "复制 .env 配置文件..."
-    cp "$TEMP_DIR/.env" .env
-    success "环境变量配置已就绪"
 else
     warn "打包文件中未包含 .env 文件"
 fi
@@ -158,6 +154,12 @@ if [ ! -f ".env" ]; then
 else
     info ".env 文件已就绪"
 fi
+
+# 创建日志目录
+info "准备日志目录..."
+mkdir -p logs
+chmod 777 logs
+success "日志目录已就绪"
 
 # 启动服务
 info "启动服务..."
