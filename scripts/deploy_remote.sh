@@ -109,12 +109,12 @@ else
 fi
 
 # 复制配置文件
-if [ -f "$TEMP_DIR/.env" ]; then
-    if [ -f ".env" ]; then
-        success "环境变量配置已就绪"
-    fi
+if [ -f "$TEMP_DIR/.env.remote" ]; then
+    info "复制 .env.remote 为 .env..."
+    cp "$TEMP_DIR/.env.remote" .env
+    success "环境变量配置已就绪"
 else
-    warn "打包文件中未包含 .env 文件"
+    warn "打包文件中未包含 .env.remote 文件，请手动创建 .env 配置"
 fi
 
 if [ -f "$TEMP_DIR/docker-compose.prod.yml" ]; then

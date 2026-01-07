@@ -770,11 +770,10 @@ sh scripts/stop_all.sh --all
 
 ---
 
-## 🚀 生产环境部署 
+## 🚀 生产环境部署
+>
 > [!IMPORTANT]
 > **离线部署**: 云端服务器位于私域网络,无法访问外网拉取 Docker 镜像和依赖包
-
-
 
 #### 部署架构
 
@@ -995,6 +994,73 @@ sudo firewall-cmd --list-ports
 # 云端: 停止服务、重新部署
 docker-compose -f docker-compose.prod.yml down
 ./scripts/deploy_remote.sh portrait-images.tar
+```
+
+---
+
+### 📊 数据清洗与同步
+
+部署完成后，需要触发数据同步将源数据库（MySQL）的通话记录清洗到画像数据库（PostgreSQL）。
+
+#### 自动同步（定时任务）
+
+系统使用 **APScheduler** 管理定时任务：
+
+| 任务 | 执行时间 | 说明 |
+|------|---------|------|
+| **数据同步** | 每天 02:00 | 同步前一天的通话记录 |
+| **规则分析** | 每天 02:30 | 分析未处理的记录 |
+| **周期快照** | 每天 06:00 | 周一计算周快照，1号计算月快照 |
+| **场景汇总** | 每天 06:30 | 计算场景统计 |
+
+**环境变量配置**（`.env` 文件）：
+
+```env
+SCHEDULER_ENABLED=true
+SCHEDULER_TIMEZONE=Asia/Shanghai
+SYNC_CRON_HOUR=2
+SYNC_CRON_MINUTE=0
+```
+
+#### 手动触发同步
+
+**方式 1: 通过 API（推荐）**
+
+```bash
+# 同步指定日期的数据
+curl -X POST http://localhost:8000/api/v1/admin/sync \
+  -H "Content-Type: application/json" \
+  -d '{"date": "2025-11-01"}'
+```
+
+**方式 2: 通过 API 文档界面**
+
+1. 访问 `http://localhost:8000/docs`
+2. 找到 `/api/v1/admin/sync` 接口
+3. 点击 "Try it out"，输入日期，点击 "Execute"
+
+**方式 3: 批量同步历史数据**
+
+```bash
+# 循环同步多天数据
+for date in 2025-11-{01..30}; do
+  curl -X POST http://localhost:8000/api/v1/admin/sync \
+    -H "Content-Type: application/json" \
+    -d "{\"date\": \"$date\"}"
+  sleep 5  # 避免过载
+done
+```
+
+#### 验证同步结果
+
+```bash
+# 查看同步的记录数
+docker exec portrait-postgres psql -U portrait -d portrait -c "
+SELECT call_date, COUNT(*) as count
+FROM call_record_enriched
+GROUP BY call_date
+ORDER BY call_date DESC LIMIT 10;
+"
 ```
 
 ---
@@ -1258,7 +1324,6 @@ LOG_LEVEL=INFO  # DEBUG, INFO, WARNING, ERROR
 # 调试模式
 DEBUG=true  # 开发环境: true, 生产环境: false
 ```
-
 
 ### 💡 提示
 

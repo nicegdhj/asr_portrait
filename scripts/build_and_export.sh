@@ -120,17 +120,12 @@ docker save -o "$IMAGES_TAR" \
     postgres:15-alpine || error "镜像导出失败"
 success "镜像合并完成"
 
-# 检查 .env 文件
-if [ ! -f ".env" ]; then
-    warn ".env 文件不存在,将使用 env.production.example 作为模板"
-    if [ -f "env.production.example" ]; then
-        cp env.production.example "$OUTPUT_DIR/.env"
-    else
-        warn "env.production.example 也不存在,跳过环境变量文件打包"
-    fi
+# 检查 .env.remote 文件（远端环境配置）
+if [ ! -f ".env.remote" ]; then
+    error ".env.remote 文件不存在，请先创建远端环境配置文件"
 else
-    info "复制 .env 文件到打包目录..."
-    cp .env "$OUTPUT_DIR/.env"
+    info "复制 .env.remote 文件到打包目录..."
+    cp .env.remote "$OUTPUT_DIR/.env.remote"
 fi
 
 # 复制 docker-compose.prod.yml
@@ -152,9 +147,8 @@ cd "$OUTPUT_DIR"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 OUTPUT_FILENAME="portrait-images_${TIMESTAMP}.tar.gz"
 
-# 打包时包含脚本目录
-tar -czf "$OUTPUT_FILENAME" images.tar docker-compose.prod.yml scripts/ .env 2>/dev/null || \
-    tar -czf "$OUTPUT_FILENAME" images.tar docker-compose.prod.yml scripts/
+# 打包时包含脚本目录和环境配置
+tar -czf "$OUTPUT_FILENAME" images.tar docker-compose.prod.yml scripts/ .env.remote
 cd "$PROJECT_DIR"
 
 # 清理临时文件
@@ -180,9 +174,7 @@ echo "    - portrait-api:latest (Docker 镜像)"
 echo "    - portrait-web:latest (Docker 镜像)"
 echo "    - postgres:15-alpine (Docker 镜像)"
 echo "    - docker-compose.prod.yml (编排配置)"
-if [ -f "$OUTPUT_DIR/.env" ]; then
-    echo "    - .env (环境变量配置)"
-fi
+echo "    - .env.remote (远端环境变量配置)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
