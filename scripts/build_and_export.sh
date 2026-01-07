@@ -44,17 +44,17 @@ info "Docker 版本: $(docker --version)"
 # 检查并创建 buildx 构建器
 info "检查 Docker Buildx 环境..."
 if ! docker buildx version &> /dev/null; then
-    error "Docker Buildx 不可用，请升级 Docker Desktop"
+    error "Docker Buildx 不可用，请升级 Docker"
 fi
 
+# 使用 docker 驱动（而不是 docker-container）以避免网络问题
 if docker buildx ls | grep -q "multiarch"; then
-    info "使用现有的 multiarch 构建器"
-    docker buildx use multiarch
-else
-    info "创建新的 multiarch 构建器..."
-    docker buildx create --name multiarch --driver docker-container --use
-    docker buildx inspect --bootstrap
+    info "删除现有的 multiarch 构建器..."
+    docker buildx rm multiarch || true
 fi
+
+info "创建新的 multiarch 构建器（使用 docker 驱动）..."
+docker buildx create --name multiarch --driver docker --use
 success "Buildx 环境准备完成"
 
 # 构建镜像并直接导出为 tar
