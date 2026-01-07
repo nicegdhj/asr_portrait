@@ -105,6 +105,16 @@ class TaskScheduler:
         )
         logger.info("注册任务: 场景汇总计算 @ 06:30")
 
+        # 5. 同步任务名称 (凌晨6:35，在场景汇总计算之后)
+        self.scheduler.add_job(
+            self._job_sync_task_names,
+            trigger=CronTrigger(hour=6, minute=35),
+            id="sync_task_names",
+            name="同步任务名称",
+            replace_existing=True,
+        )
+        logger.info("注册任务: 同步任务名称 @ 06:35")
+
     async def _job_sync_yesterday_records(self) -> None:
         """
         同步昨日通话记录
@@ -190,6 +200,22 @@ class TaskScheduler:
 
         except Exception as e:
             logger.error(f"[定时任务] 场景汇总计算失败: {e}")
+
+    async def _job_sync_task_names(self) -> None:
+        """
+        同步任务名称
+
+        从源数据库读取任务名称，更新到场景汇总表
+        """
+        from src.services.etl_service import etl_service
+
+        logger.info("[定时任务] 开始同步任务名称")
+
+        try:
+            result = await etl_service.sync_task_names()
+            logger.info(f"[定时任务] 任务名称同步完成: {result}")
+        except Exception as e:
+            logger.error(f"[定时任务] 任务名称同步失败: {e}")
 
     # ==========================================
     # 手动触发接口
