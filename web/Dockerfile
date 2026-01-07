@@ -1,7 +1,7 @@
 # ===========================================
 # 构建阶段 - 使用 Node.js 构建 Vue 应用
 # ===========================================
-FROM --platform=linux/amd64 node:20-alpine AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
@@ -21,7 +21,7 @@ RUN npm run build
 # ===========================================
 # 生产阶段 - 使用 Nginx 提供静态文件
 # ===========================================
-FROM --platform=linux/amd64 nginx:alpine
+FROM nginx:alpine
 
 # 复制构建产物
 COPY --from=builder /app/dist /usr/share/nginx/html
@@ -32,9 +32,9 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 # 暴露端口
 EXPOSE 80
 
-# 健康检查
+# 健康检查（使用 curl，nginx:alpine 镜像不包含 wget）
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --quiet --tries=1 --spider http://localhost:80 || exit 1
+    CMD curl -f http://localhost:80 || exit 1
 
 # 启动 Nginx
 CMD ["nginx", "-g", "daemon off;"]

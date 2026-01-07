@@ -4,7 +4,7 @@
 # ===========================================
 # 构建阶段
 # ===========================================
-FROM --platform=linux/amd64 python:3.11-slim as builder
+FROM python:3.11-slim as builder
 
 WORKDIR /app
 
@@ -27,7 +27,7 @@ RUN uv venv /opt/venv && \
 # ===========================================
 # 运行阶段
 # ===========================================
-FROM --platform=linux/amd64 python:3.11-slim as runtime
+FROM python:3.11-slim as runtime
 
 WORKDIR /app
 

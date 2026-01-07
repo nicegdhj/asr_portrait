@@ -170,6 +170,40 @@ $COMPOSE_CMD -f docker-compose.prod.yml up -d || error "服务启动失败"
 echo ""
 success "服务已启动"
 
+# ===========================================
+# 检查源数据库连接（支持本地 Docker 容器场景）
+# ===========================================
+if [ -f ".env" ]; then
+    MYSQL_HOST=$(grep "^MYSQL_HOST=" .env | cut -d'=' -f2 | tr -d '"' | tr -d "'" | sed 's/#.*//' | xargs)
+    if [ -n "$MYSQL_HOST" ]; then
+        # 检查 MYSQL_HOST 是否是一个正在运行的 Docker 容器
+        if docker ps --format '{{.Names}}' | grep -q "^${MYSQL_HOST}$"; then
+            info "检测到源数据库 '$MYSQL_HOST' 是本地 Docker 容器"
+            
+            # 获取 portrait 网络名称
+            PORTRAIT_NETWORK=$($COMPOSE_CMD -f docker-compose.prod.yml config --format json 2>/dev/null | grep -o '"portrait-network"' | head -1 | tr -d '"' || echo "")
+            if [ -z "$PORTRAIT_NETWORK" ]; then
+                # 尝试从实际网络中获取
+                PORTRAIT_NETWORK=$(docker network ls --format '{{.Name}}' | grep "portrait-network" | head -1)
+            fi
+            
+            if [ -n "$PORTRAIT_NETWORK" ]; then
+                # 检查容器是否已在网络中
+                if ! docker inspect "$MYSQL_HOST" --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' | grep -q "$PORTRAIT_NETWORK"; then
+                    info "将源数据库容器 '$MYSQL_HOST' 加入网络 '$PORTRAIT_NETWORK'..."
+                    docker network connect "$PORTRAIT_NETWORK" "$MYSQL_HOST" 2>/dev/null && \
+                        success "源数据库已加入网络" || \
+                        warn "无法将源数据库加入网络，可能需要手动连接"
+                else
+                    info "源数据库容器已在网络 '$PORTRAIT_NETWORK' 中"
+                fi
+            fi
+        else
+            info "源数据库 '$MYSQL_HOST' 将通过网络直接连接"
+        fi
+    fi
+fi
+
 # 等待服务就绪
 info "等待服务启动..."
 sleep 10

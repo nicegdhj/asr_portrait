@@ -380,10 +380,10 @@ class UserPortraitSnapshot(PortraitBase, UUIDPrimaryKeyMixin):
 
     __table_args__ = (
         UniqueConstraint("customer_id", "task_id", "period_type", "period_key", name="uq_customer_task_period"),
-        Index("idx_period", "period_type", "period_key"),
-        Index("idx_customer_task", "customer_id", "task_id"),
-        Index("idx_task_period", "task_id", "period_type", "period_key"),
-        Index("idx_period_start", "period_start"),
+        Index("idx_snapshot_period", "period_type", "period_key"),
+        Index("idx_snapshot_customer_task", "customer_id", "task_id"),
+        Index("idx_snapshot_task_period", "task_id", "period_type", "period_key"),
+        Index("idx_snapshot_period_start", "period_start"),
         {"comment": "客户画像快照表"},
     )
 

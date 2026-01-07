@@ -41,24 +41,12 @@ if ! command -v docker &> /dev/null; then
 fi
 info "Docker 版本: $(docker --version)"
 
-# 检查并创建 buildx 构建器
-info "检查 Docker Buildx 环境..."
-if ! docker buildx version &> /dev/null; then
-    error "Docker Buildx 不可用，请升级 Docker"
-fi
+# 检查当前系统架构
+CURRENT_ARCH=$(uname -m)
+info "当前系统架构: $CURRENT_ARCH"
 
-# 使用 docker 驱动（而不是 docker-container）以避免网络问题
-if docker buildx ls | grep -q "multiarch"; then
-    info "删除现有的 multiarch 构建器..."
-    docker buildx rm multiarch || true
-fi
-
-info "创建新的 multiarch 构建器（使用 docker 驱动）..."
-docker buildx create --name multiarch --driver docker --use
-success "Buildx 环境准备完成"
-
-# 构建镜像并直接导出为 tar
-info "开始构建 linux/amd64 平台镜像..."
+# 构建镜像（使用本地架构）
+info "开始构建镜像..."
 echo ""
 
 # 创建临时目录存放单个镜像 tar
@@ -66,28 +54,26 @@ TEMP_DIR="${OUTPUT_DIR}/temp"
 mkdir -p "$TEMP_DIR"
 
 info "1/3 构建后端 API 镜像..."
-docker buildx build \
-    --platform linux/amd64 \
+docker build \
     -t portrait-api:latest \
-    --output type=docker,dest="${TEMP_DIR}/portrait-api.tar" \
     -f docker/Dockerfile \
     . || error "后端镜像构建失败"
+docker save -o "${TEMP_DIR}/portrait-api.tar" portrait-api:latest || error "后端镜像导出失败"
 success "后端镜像构建完成"
 echo ""
 
 info "2/3 构建前端 Web 镜像..."
-docker buildx build \
-    --platform linux/amd64 \
+docker build \
     -t portrait-web:latest \
-    --output type=docker,dest="${TEMP_DIR}/portrait-web.tar" \
     -f web/Dockerfile \
     ./web || error "前端镜像构建失败"
+docker save -o "${TEMP_DIR}/portrait-web.tar" portrait-web:latest || error "前端镜像导出失败"
 success "前端镜像构建完成"
 echo ""
 
 # 拉取 PostgreSQL 镜像并导出
 info "3/3 拉取并导出 PostgreSQL 镜像..."
-docker pull --platform linux/amd64 postgres:15-alpine
+docker pull postgres:15-alpine
 docker save -o "${TEMP_DIR}/postgres.tar" postgres:15-alpine || error "PostgreSQL 镜像导出失败"
 success "PostgreSQL 镜像导出完成"
 echo ""

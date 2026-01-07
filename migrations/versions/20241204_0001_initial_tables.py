@@ -79,7 +79,9 @@ def upgrade() -> None:
     op.create_table(
         "user_portrait_snapshot",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False, comment="主键ID"),
-        sa.Column("user_id", sa.String(64), nullable=False, comment="用户ID"),  # 修改为 String
+        sa.Column("customer_id", sa.String(64), nullable=False, comment="被呼客户ID"),  # 修改为 customer_id
+        sa.Column("phone", sa.String(20), nullable=True, comment="客户手机号"),  # 新增
+        sa.Column("task_id", postgresql.UUID(as_uuid=True), nullable=False, comment="任务/场景ID"),  # 新增
         sa.Column("period_type", sa.String(16), nullable=False, comment="周期类型"),
         sa.Column("period_key", sa.String(16), nullable=False, comment="周期编号"),
         sa.Column("period_start", sa.Date(), nullable=False, comment="周期开始日期"),
@@ -118,17 +120,36 @@ def upgrade() -> None:
         sa.Column("high_churn_risk", sa.Integer(), default=0, comment="高流失风险次数"),
         sa.Column("medium_churn_risk", sa.Integer(), default=0, comment="中流失风险次数"),
         sa.Column("low_churn_risk", sa.Integer(), default=0, comment="低流失风险次数"),
+        # 满意度统计 (新增)
+        sa.Column("satisfied_count", sa.Integer(), default=0, comment="满意次数"),
+        sa.Column("neutral_satisfaction_count", sa.Integer(), default=0, comment="一般满意次数"),
+        sa.Column("unsatisfied_count", sa.Integer(), default=0, comment="不满意次数"),
+        sa.Column("final_satisfaction", sa.String(16), nullable=True, comment="最终满意度"),
+        # 情感统计 (新增)
+        sa.Column("final_emotion", sa.String(16), nullable=True, comment="最终情感"),
+        # 沟通意愿 (新增)
+        sa.Column("willingness", sa.String(16), nullable=True, comment="沟通意愿"),
+        sa.Column("willingness_deep_count", sa.Integer(), default=0, comment="深度沟通次数"),
+        sa.Column("willingness_normal_count", sa.Integer(), default=0, comment="一般沟通次数"),
+        sa.Column("willingness_low_count", sa.Integer(), default=0, comment="较低沟通次数"),
+        # 综合风险 (新增)
+        sa.Column("risk_level", sa.String(16), nullable=True, comment="综合风险"),
+        sa.Column("risk_churn_count", sa.Integer(), default=0, comment="流失风险次数"),
+        sa.Column("risk_complaint_count", sa.Integer(), default=0, comment="投诉风险次数"),
+        sa.Column("risk_medium_count", sa.Integer(), default=0, comment="一般风险次数"),
+        sa.Column("risk_none_count", sa.Integer(), default=0, comment="无风险次数"),
         # 元数据
         sa.Column("computed_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("user_id", "period_type", "period_key", name="uq_user_period"),
+        sa.UniqueConstraint("customer_id", "task_id", "period_type", "period_key", name="uq_customer_task_period"),
         comment="用户画像快照表",
     )
 
     # 创建索引
-    op.create_index("idx_snapshot_user_id", "user_portrait_snapshot", ["user_id"])
+    op.create_index("idx_snapshot_customer_id", "user_portrait_snapshot", ["customer_id"])
     op.create_index("idx_snapshot_period", "user_portrait_snapshot", ["period_type", "period_key"])
-    op.create_index("idx_snapshot_user_period", "user_portrait_snapshot", ["user_id", "period_type"])
+    op.create_index("idx_snapshot_customer_task", "user_portrait_snapshot", ["customer_id", "task_id"])
+    op.create_index("idx_snapshot_task_period", "user_portrait_snapshot", ["task_id", "period_type", "period_key"])
     op.create_index("idx_snapshot_period_start", "user_portrait_snapshot", ["period_start"])
 
     # =========================================

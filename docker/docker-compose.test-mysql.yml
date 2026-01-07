@@ -1,0 +1,49 @@
+# MySQL 测试环境 - 用于模拟线上数据源
+# 使用方式: docker compose -f docker/docker-compose.test-mysql.yml up -d
+
+services:
+  # ===========================================
+  # MySQL 测试数据源
+  # ===========================================
+  test-mysql:
+    image: mysql:8.0
+    platform: linux/amd64
+    container_name: portrait-test-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: outbound_saas
+    ports:
+      - "3306:3306" # 使用 3306 端口
+    volumes:
+      # 挂载初始化 SQL 脚本
+      - ../data/mock_sql:/docker-entrypoint-initdb.d:ro
+      # 持久化数据
+      - mysql_test_data:/var/lib/mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+    networks:
+      - portrait-test-network
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot123" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10 # 增加重试次数
+      start_period: 120s # 增加启动等待时间到 2 分钟（数据文件较大）
+
+# ===========================================
+# 数据卷
+# ===========================================
+volumes:
+  mysql_test_data:
+    driver: local
+
+# ===========================================
+# 网络
+# ===========================================
+networks:
+  portrait-test-network:
+    driver: bridge
+
