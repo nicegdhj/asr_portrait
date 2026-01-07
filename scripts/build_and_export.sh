@@ -123,7 +123,9 @@ info "复制部署脚本..."
 mkdir -p "$OUTPUT_DIR/scripts"
 cp scripts/deploy_remote.sh "$OUTPUT_DIR/scripts/"
 cp scripts/check_access.sh "$OUTPUT_DIR/scripts/"
+cp scripts/verify_deployment.py "$OUTPUT_DIR/scripts/"
 chmod +x "$OUTPUT_DIR/scripts/"*.sh
+chmod +x "$OUTPUT_DIR/scripts/"*.py
 
 # 打包所有文件
 info "打包镜像和配置文件..."
@@ -161,6 +163,7 @@ echo "    - portrait-web:latest (Docker 镜像)"
 echo "    - postgres:15-alpine (Docker 镜像)"
 echo "    - docker-compose.prod.yml (编排配置)"
 echo "    - .env.remote (远端环境变量配置)"
+echo "    - scripts/verify_deployment.py (部署验证脚本)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
