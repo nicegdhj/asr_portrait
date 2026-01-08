@@ -14,8 +14,22 @@
 
 set -e
 
+# 从 .env 文件读取 API_PORT (如果存在)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+ENV_FILE="$PROJECT_DIR/.env"
+
+API_PORT=8000
+if [ -f "$ENV_FILE" ]; then
+    # 读取 API_PORT 配置
+    API_PORT_FROM_ENV=$(grep "^API_PORT=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'" | xargs)
+    if [ -n "$API_PORT_FROM_ENV" ]; then
+        API_PORT="$API_PORT_FROM_ENV"
+    fi
+fi
+
 # 默认参数
-API_URL="http://localhost:8000"
+API_URL="http://localhost:${API_PORT}"
 TARGET_DATE=$(date -d "yesterday" +%Y-%m-%d 2>/dev/null || date -v-1d +%Y-%m-%d 2>/dev/null || date +%Y-%m-%d)
 SKIP_SYNC=false
 

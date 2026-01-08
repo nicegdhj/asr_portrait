@@ -90,6 +90,25 @@ done
 # ===========================================
 title "端口监听状态"
 
+# 从 .env 文件读取端口配置
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+ENV_FILE="$PROJECT_DIR/.env"
+
+API_PORT=8000
+WEB_PORT=80
+POSTGRES_PORT=5432
+
+if [ -f "$ENV_FILE" ]; then
+    API_PORT_FROM_ENV=$(grep "^API_PORT=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'" | xargs)
+    WEB_PORT_FROM_ENV=$(grep "^WEB_PORT=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'" | xargs)
+    POSTGRES_PORT_FROM_ENV=$(grep "^POSTGRES_PORT=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d '"' | tr -d "'" | xargs)
+    
+    [ -n "$API_PORT_FROM_ENV" ] && API_PORT="$API_PORT_FROM_ENV"
+    [ -n "$WEB_PORT_FROM_ENV" ] && WEB_PORT="$WEB_PORT_FROM_ENV"
+    [ -n "$POSTGRES_PORT_FROM_ENV" ] && POSTGRES_PORT="$POSTGRES_PORT_FROM_ENV"
+fi
+
 check_port() {
     local port=$1
     local name=$2
@@ -102,9 +121,9 @@ check_port() {
     fi
 }
 
-check_port 80 "前端"
-check_port 8000 "后端API"
-check_port 5432 "PostgreSQL"
+check_port $WEB_PORT "前端"
+check_port $API_PORT "后端API"
+check_port $POSTGRES_PORT "PostgreSQL"
 
 # ===========================================
 # 4. 服务健康检测
@@ -112,14 +131,14 @@ check_port 5432 "PostgreSQL"
 title "服务健康检查"
 
 # 前端检测
-if curl -sf --connect-timeout 5 http://localhost:80 > /dev/null 2>&1; then
+if curl -sf --connect-timeout 5 http://localhost:${WEB_PORT} > /dev/null 2>&1; then
     info "前端服务: 正常响应"
 else
     error "前端服务: 无响应"
 fi
 
 # 后端 API 检测
-API_HEALTH=$(curl -sf --connect-timeout 5 http://localhost:8000/health 2>/dev/null)
+API_HEALTH=$(curl -sf --connect-timeout 5 http://localhost:${API_PORT}/health 2>/dev/null)
 if [ $? -eq 0 ]; then
     info "后端 API: 正常响应"
 else
@@ -146,7 +165,7 @@ if command -v ufw &> /dev/null; then
     if echo "$UFW_STATUS" | grep -q "active"; then
         info "UFW 防火墙: 已启用"
         # 检查端口是否开放
-        for port in 80 8000; do
+        for port in $WEB_PORT $API_PORT; do
             if sudo ufw status 2>/dev/null | grep -qE "^${port}.*ALLOW"; then
                 info "  端口 ${port}: 已开放"
             else
@@ -163,7 +182,7 @@ fi
 if command -v firewall-cmd &> /dev/null; then
     if systemctl is-active firewalld &> /dev/null; then
         info "firewalld 防火墙: 已启用"
-        for port in 80 8000; do
+        for port in $WEB_PORT $API_PORT; do
             if sudo firewall-cmd --list-ports 2>/dev/null | grep -q "${port}/tcp"; then
                 info "  端口 ${port}: 已开放"
             else
@@ -192,27 +211,27 @@ echo -e "${CYAN}│${NC}  ${GREEN}前端访问地址${NC}                       
 echo -e "${CYAN}├──────────────────────────────────────────────────────────┤${NC}"
 
 if [ "$INTERNAL_IP" != "无法获取" ]; then
-    echo -e "${CYAN}│${NC}  局域网: ${YELLOW}http://${INTERNAL_IP}${NC}"
+    echo -e "${CYAN}│${NC}  局域网: ${YELLOW}http://${INTERNAL_IP}${NC}                        ${CYAN}│${NC}"
 fi
 
 if [ -n "$PUBLIC_IP" ]; then
-    echo -e "${CYAN}│${NC}  公网:   ${YELLOW}http://${PUBLIC_IP}${NC}"
+    echo -e "${CYAN}│${NC}  公网:   ${YELLOW}http://${PUBLIC_IP}${NC}                        ${CYAN}│${NC}"
 fi
 
-echo -e "${CYAN}│${NC}  本机:   ${YELLOW}http://localhost${NC}"
+echo -e "${CYAN}│${NC}  本机:   ${YELLOW}http://localhost${NC}                             ${CYAN}│${NC}"
 echo -e "${CYAN}├──────────────────────────────────────────────────────────┤${NC}"
 echo -e "${CYAN}│${NC}  ${GREEN}API 文档${NC}                                              ${CYAN}│${NC}"
 echo -e "${CYAN}├──────────────────────────────────────────────────────────┤${NC}"
 
 if [ "$INTERNAL_IP" != "无法获取" ]; then
-    echo -e "${CYAN}│${NC}  局域网: ${YELLOW}http://${INTERNAL_IP}:8000/docs${NC}"
+    echo -e "${CYAN}│${NC}  局域网: ${YELLOW}http://${INTERNAL_IP}:${API_PORT}/docs${NC}               ${CYAN}│${NC}"
 fi
 
 if [ -n "$PUBLIC_IP" ]; then
-    echo -e "${CYAN}│${NC}  公网:   ${YELLOW}http://${PUBLIC_IP}:8000/docs${NC}"
+    echo -e "${CYAN}│${NC}  公网:   ${YELLOW}http://${PUBLIC_IP}:${API_PORT}/docs${NC}               ${CYAN}│${NC}"
 fi
 
-echo -e "${CYAN}│${NC}  本机:   ${YELLOW}http://localhost:8000/docs${NC}"
+echo -e "${CYAN}│${NC}  本机:   ${YELLOW}http://localhost:${API_PORT}/docs${NC}                    ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────────────────────┘${NC}"
 echo ""
 
