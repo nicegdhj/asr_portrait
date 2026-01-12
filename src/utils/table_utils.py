@@ -6,25 +6,37 @@
 - 通话详情表: autodialer_call_record_detail_{YYYY_MM}
 - 号码表: autodialer_number_{task_uuid}
 
-分表后缀基于任务创建时间 (create_datetime)
+注意：源数据库可能不是严格按月分表，而是持续往一个表写入。
+可通过环境变量 SOURCE_TABLE_SUFFIX 指定固定的表后缀。
 """
 
+import os
 from datetime import date, datetime
 from typing import List
 
 from dateutil.relativedelta import relativedelta
 
 
+# 固定表后缀（如果设置，则忽略日期计算，直接使用此后缀）
+# 例如: SOURCE_TABLE_SUFFIX=2025_11 表示所有数据都在 autodialer_call_record_2025_11 表中
+FIXED_TABLE_SUFFIX = os.getenv("SOURCE_TABLE_SUFFIX", "").strip()
+
+
 def get_call_record_table(task_create_datetime: datetime | date) -> str:
     """
     根据任务创建时间获取通话记录表名
-    
+
+    如果设置了 SOURCE_TABLE_SUFFIX 环境变量，则使用固定表名。
+
     Args:
         task_create_datetime: 任务创建时间
-        
+
     Returns:
         表名，如 "autodialer_call_record_2024_11"
     """
+    if FIXED_TABLE_SUFFIX:
+        return f"autodialer_call_record_{FIXED_TABLE_SUFFIX}"
+
     if isinstance(task_create_datetime, datetime):
         task_create_datetime = task_create_datetime.date()
     suffix = task_create_datetime.strftime("%Y_%m")
@@ -34,13 +46,18 @@ def get_call_record_table(task_create_datetime: datetime | date) -> str:
 def get_call_record_detail_table(task_create_datetime: datetime | date) -> str:
     """
     根据任务创建时间获取通话详情表名
-    
+
+    如果设置了 SOURCE_TABLE_SUFFIX 环境变量，则使用固定表名。
+
     Args:
         task_create_datetime: 任务创建时间
-        
+
     Returns:
         表名，如 "autodialer_call_record_detail_2024_11"
     """
+    if FIXED_TABLE_SUFFIX:
+        return f"autodialer_call_record_detail_{FIXED_TABLE_SUFFIX}"
+
     if isinstance(task_create_datetime, datetime):
         task_create_datetime = task_create_datetime.date()
     suffix = task_create_datetime.strftime("%Y_%m")
@@ -50,10 +67,10 @@ def get_call_record_detail_table(task_create_datetime: datetime | date) -> str:
 def get_number_table(task_uuid: str) -> str:
     """
     根据任务ID获取号码表名
-    
+
     Args:
         task_uuid: 任务 UUID
-        
+
     Returns:
         表名，如 "autodialer_number_abc123"
     """
@@ -69,20 +86,20 @@ def get_tables_for_period(
 ) -> List[str]:
     """
     获取时间区间内涉及的所有分表
-    
+
     按月分表，一个季度最多涉及3-4个月的表
-    
+
     Args:
         start_date: 开始日期
         end_date: 结束日期
         table_type: "call_record" 或 "call_record_detail"
-        
+
     Returns:
         表名列表，如 ["autodialer_call_record_2024_10", "autodialer_call_record_2024_11", ...]
     """
     tables = []
     current = start_date.replace(day=1)
-    
+
     while current <= end_date:
         suffix = current.strftime("%Y_%m")
         if table_type == "call_record":
@@ -91,20 +108,20 @@ def get_tables_for_period(
             tables.append(f"autodialer_call_record_detail_{suffix}")
         else:
             raise ValueError(f"不支持的表类型: {table_type}")
-        
+
         # 下个月
         current = current + relativedelta(months=1)
-    
+
     return tables
 
 
 def get_table_suffix_from_date(dt: datetime | date) -> str:
     """
     从日期获取表后缀
-    
+
     Args:
         dt: 日期
-        
+
     Returns:
         后缀，如 "2024_11"
     """
@@ -116,10 +133,10 @@ def get_table_suffix_from_date(dt: datetime | date) -> str:
 def parse_table_suffix(suffix: str) -> date:
     """
     解析表后缀获取日期
-    
+
     Args:
         suffix: 表后缀，如 "2024_11"
-        
+
     Returns:
         对应月份的第一天
     """
@@ -130,10 +147,10 @@ def parse_table_suffix(suffix: str) -> date:
 def check_table_exists_sql(table_name: str) -> str:
     """
     生成检查表是否存在的 SQL
-    
+
     Args:
         table_name: 表名
-        
+
     Returns:
         SQL 语句 (MySQL)
     """
@@ -154,37 +171,37 @@ def build_union_query(
 ) -> str:
     """
     构建多表 UNION ALL 查询
-    
+
     用于跨月查询通话记录
-    
+
     Args:
         tables: 表名列表
         select_clause: SELECT 字段，如 "id, callid, duration"
         where_clause: WHERE 条件，如 "WHERE user_id = 'xxx'"
         order_clause: ORDER BY 子句，如 "ORDER BY created_at DESC"
         limit: LIMIT 数量
-        
+
     Returns:
         SQL 查询语句
     """
     if not tables:
         raise ValueError("表名列表不能为空")
-    
+
     queries = []
     for table in tables:
         q = f"SELECT {select_clause} FROM {table}"
         if where_clause:
             q += f" {where_clause}"
         queries.append(q)
-    
+
     sql = " UNION ALL ".join(queries)
-    
+
     if order_clause:
         sql = f"SELECT * FROM ({sql}) AS combined {order_clause}"
-    
+
     if limit:
         sql += f" LIMIT {limit}"
-    
+
     return sql
 
 
@@ -254,4 +271,3 @@ NUMBER_STATUS_MAP = {
 def get_number_status_label(status: int) -> str:
     """获取号码状态的中文标签"""
     return NUMBER_STATUS_MAP.get(status, f"未知状态({status})")
-
