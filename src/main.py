@@ -29,7 +29,16 @@ async def lifespan(app: FastAPI):
     # 初始化数据库连接
     async with lifespan_db():
         logger.info("数据库连接已建立")
+
+        # 启动定时任务调度器
+        from src.tasks.scheduler import task_scheduler
+
+        task_scheduler.start()
+
         yield
+
+        # 关闭调度器
+        task_scheduler.shutdown()
 
     logger.info("服务已停止")
 
