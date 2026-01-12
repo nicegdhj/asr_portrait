@@ -67,6 +67,8 @@ services:
       - MYSQL_USER=${MYSQL_USER}
       - MYSQL_PASSWORD=${MYSQL_PASSWORD}
       - MYSQL_DB=${MYSQL_DB:-outbound_saas}
+      # 源数据库表后缀 (源系统未按月分表，所有数据都在 2025_11 表中)
+      - SOURCE_TABLE_SUFFIX=${SOURCE_TABLE_SUFFIX:-}
       # 调度器配置 (可选)
       - SCHEDULER_ENABLED=${SCHEDULER_ENABLED:-false}
       - SYNC_CRON_HOUR=${SYNC_CRON_HOUR:-2}
