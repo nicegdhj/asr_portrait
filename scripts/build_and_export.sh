@@ -124,8 +124,9 @@ mkdir -p "$OUTPUT_DIR/scripts"
 cp scripts/deploy_remote.sh "$OUTPUT_DIR/scripts/"
 cp scripts/check_access.sh "$OUTPUT_DIR/scripts/"
 cp scripts/verify_deployment.sh "$OUTPUT_DIR/scripts/"
+cp scripts/check_source_data.sh "$OUTPUT_DIR/scripts/"
 chmod +x "$OUTPUT_DIR/scripts/"*.sh
-chmod +x "$OUTPUT_DIR/scripts/"*.py
+chmod +x "$OUTPUT_DIR/scripts/"*.py 2>/dev/null || true
 
 # 打包所有文件
 info "打包镜像和配置文件..."
